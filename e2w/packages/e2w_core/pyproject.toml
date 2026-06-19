@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "e2w_core"
+version = "0.1.0"
+description = "CF-VEdit / E2W shared contract layer (masks, plan, latent, IO). The seam — depends on nothing internal."
+requires-python = ">=3.10"
+dependencies = []  # contract layer stays dependency-light on purpose
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["e2w_core*"]
