@@ -137,14 +137,23 @@ def validate_against_schema(obj, schema, where="$"):
                 validate_against_schema(item, item_schema, f"{where}[{index}]")
 
     if isinstance(obj, dict):
+        properties = schema.get("properties", {})
         for key in schema.get("required", []):
             if key not in obj:
                 raise ValidationError(f"{where}: missing required field {key!r}")
         if "minProperties" in schema and len(obj) < schema["minProperties"]:
             raise ValidationError(f"{where}: object has fewer than {schema['minProperties']} properties")
-        for key, child_schema in schema.get("properties", {}).items():
+        for key, child_schema in properties.items():
             if key in obj:
                 validate_against_schema(obj[key], child_schema, f"{where}.{key}")
+        additional = schema.get("additionalProperties")
+        if additional is not None and additional is not True:
+            for key, value in obj.items():
+                if key in properties:
+                    continue
+                if additional is False:
+                    raise ValidationError(f"{where}.{key}: additional property not allowed")
+                validate_against_schema(value, additional, f"{where}.{key}")
 
 
 def load_contract_for_manifest_row(row, validate=False):
@@ -262,7 +271,13 @@ def validate_predictions(run_name):
         raise ValidationError(f"run_meta num_samples should be {len(rows)}")
 
     predictions = read_jsonl(run_dir / "predictions.jsonl")
-    prediction_ids = {row.get("sample_id") for row in predictions}
+    pred_counts = Counter(row.get("sample_id") for row in predictions)
+    duplicate_ids = sorted(sid for sid, count in pred_counts.items() if count > 1)
+    if duplicate_ids:
+        raise ValidationError(
+            f"duplicate sample_id rows in predictions.jsonl: {duplicate_ids}"
+        )
+    prediction_ids = set(pred_counts)
     if prediction_ids != sample_ids:
         missing = sorted(sample_ids - prediction_ids)
         extra = sorted(prediction_ids - sample_ids)
@@ -319,6 +334,14 @@ def normalize_score_row(raw, sample_id, judge, status, contract):
         effect_hits = [effect_hits]
     row["effect_hits"] = list(effect_hits)
     row["effect_total"] = total_effect_count(contract)
+    # target_success is the precondition gate (spec §5.2): if the edit did not
+    # land, the consequence/physical signals are not meaningful. Zero them here
+    # so every stored row is self-consistent — the same gate the VLM parser
+    # applies — instead of relying on per_sample_metrics to mask them at
+    # aggregation time (which left raw rows contradictory and skewed `agree`).
+    if not row["target_success"]:
+        row["physical_effect_success"] = 0
+        row["effect_hits"] = []
     return row
 
 
@@ -523,14 +546,25 @@ def aggregate_metrics(metrics):
     }
 
 
-def load_primary_scores(run_name):
-    result_path = ROOT / "results" / run_name / "per_sample.jsonl"
+def per_sample_filename(judge):
+    return "human_per_sample.jsonl" if judge == "human" else "per_sample.jsonl"
+
+
+def load_primary_scores(run_name, judge="vlm"):
+    filename = per_sample_filename(judge)
+    result_path = ROOT / "results" / run_name / filename
     if not result_path.exists():
-        raise ValidationError(f"missing VLM per-sample results: results/{run_name}/per_sample.jsonl")
+        hint = ""
+        other_judge = "vlm" if judge == "human" else "human"
+        if (ROOT / "results" / run_name / per_sample_filename(other_judge)).exists():
+            hint = f" (found {other_judge} results; try: report {run_name} --judge {other_judge})"
+        raise ValidationError(
+            f"missing {judge} per-sample results: results/{run_name}/{filename}{hint}"
+        )
     return read_jsonl(result_path)
 
 
-def build_summary(run_name, score_rows):
+def build_summary(run_name, score_rows, judge="vlm"):
     manifest_rows = load_manifest(validate=True)
     manifest_by_id = {row["sample_id"]: row for row in manifest_rows}
     score_by_id = {row["sample_id"]: row for row in score_rows}
@@ -540,11 +574,12 @@ def build_summary(run_name, score_rows):
         contract = load_contract_for_manifest_row(manifest_row)
         score_row = score_by_id.get(sample_id)
         if score_row is None:
-            score_row = empty_score_row(sample_id, "vlm", "failed", "missing per-sample result")
+            score_row = empty_score_row(sample_id, judge, "failed", "missing per-sample result")
         metrics_by_id[sample_id] = per_sample_metrics(score_row, contract)
 
     summary = aggregate_metrics(metrics_by_id.values())
     summary["run_name"] = run_name
+    summary["judge"] = judge
     summary["benchmark_version"] = BENCHMARK_VERSION
     summary["created_at"] = utc_now()
     summary["保不变量"] = summary["preservation_axis"]
@@ -575,10 +610,11 @@ def write_leaderboard(run_name, summary):
     lines = [
         "# CF-VEdit Leaderboard",
         "",
-        "| run | 保不变量 | 命中后果 | physical | edit_success | quality | n | missing | failure_rate | human_vlm_accuracy |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| run | judge | 保不变量 | 命中后果 | physical | edit_success | quality | n | missing | failure_rate | human_vlm_accuracy |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
         (
-            f"| {run_name} | {summary['preservation_axis']:.3f} | "
+            f"| {run_name} | {summary.get('judge', 'vlm')} | "
+            f"{summary['preservation_axis']:.3f} | "
             f"{summary['consequence_axis']:.3f} | {summary['physical_effect']:.3f} | "
             f"{summary['edit_success']:.3f} | {summary['quality']:.3f} | "
             f"{summary['n']} | {summary['missing']} | {summary['failure_rate']:.3f} | "
@@ -592,11 +628,11 @@ def write_leaderboard(run_name, summary):
 
 
 def cmd_report(args):
-    score_rows = load_primary_scores(args.run)
-    summary = build_summary(args.run, score_rows)
+    score_rows = load_primary_scores(args.run, args.judge)
+    summary = build_summary(args.run, score_rows, args.judge)
     write_json(ROOT / "results" / args.run / "summary.json", summary)
     write_leaderboard(args.run, summary)
-    print(f"wrote summary: results/{args.run}/summary.json")
+    print(f"wrote summary: results/{args.run}/summary.json  (judge: {args.judge})")
     print(f"wrote leaderboard: results/{args.run}/leaderboard.md")
     return 0
 
@@ -959,6 +995,12 @@ def build_parser():
 
     report = subparsers.add_parser("report")
     report.add_argument("run")
+    report.add_argument(
+        "--judge",
+        choices=["vlm", "human"],
+        default="vlm",
+        help="which judge's per-sample results to aggregate (default: vlm)",
+    )
     report.set_defaults(func=cmd_report)
 
     agree = subparsers.add_parser("agree")

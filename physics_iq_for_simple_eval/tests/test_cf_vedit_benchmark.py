@@ -7,6 +7,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+import bench  # noqa: E402  (import after sys.path is extended)
 
 
 def read_jsonl(path):
@@ -73,12 +76,98 @@ class CfVEditBenchmarkShapeTest(unittest.TestCase):
             self.assertFalse(provenance["leaked"])
 
 
+class SchemaValidatorTest(unittest.TestCase):
+    def test_additional_properties_schema_is_enforced(self):
+        # counterfactual_state declares additionalProperties: {"type": "string"};
+        # a non-string value must be rejected, not silently accepted.
+        schema = {"type": "object", "additionalProperties": {"type": "string"}}
+        bench.validate_against_schema({"physical_effect": "ok"}, schema)
+        with self.assertRaises(bench.ValidationError):
+            bench.validate_against_schema({"physical_effect": 123}, schema)
+
+    def test_additional_properties_false_rejects_unknown_keys(self):
+        schema = {
+            "type": "object",
+            "properties": {"a": {"type": "string"}},
+            "additionalProperties": False,
+        }
+        bench.validate_against_schema({"a": "x"}, schema)
+        with self.assertRaises(bench.ValidationError):
+            bench.validate_against_schema({"a": "x", "b": "y"}, schema)
+
+    def test_additional_properties_true_allows_extras(self):
+        schema = {"type": "object", "additionalProperties": True}
+        bench.validate_against_schema({"anything": 1, "more": [2]}, schema)
+
+    def test_contract_schema_rejects_non_string_counterfactual_value(self):
+        schema = bench.read_json(ROOT / "schemas" / "contract.schema.json")
+        contract = {
+            "sample_id": "x_add",
+            "operation": "add",
+            "target_ref": "thing",
+            "counterfactual_state": {"physical_effect": 123},
+            "affected_regions": ["a"],
+            "preserve_regions": ["b"],
+        }
+        with self.assertRaises(bench.ValidationError):
+            bench.validate_against_schema(contract, schema, "contract")
+
+
+class NormalizeGateTest(unittest.TestCase):
+    contract = {"affected_regions": ["a", "b"], "counterfactual_state": {"x": "y"}}
+
+    def test_failed_target_zeros_consequence_and_physical(self):
+        row = bench.normalize_score_row(
+            {
+                "target_success": 0,
+                "preservation_success": 1,
+                "physical_effect_success": 1,
+                "effect_hits": ["a", "b"],
+                "overall_pass": 1,
+            },
+            "s_add",
+            "human",
+            "ok",
+            self.contract,
+        )
+        self.assertEqual(row["target_success"], 0)
+        self.assertEqual(row["physical_effect_success"], 0)
+        self.assertEqual(row["effect_hits"], [])
+        # preservation / overall_pass are NOT gated by target_success.
+        self.assertEqual(row["preservation_success"], 1)
+        self.assertEqual(row["overall_pass"], 1)
+
+    def test_landed_target_keeps_consequence_and_physical(self):
+        row = bench.normalize_score_row(
+            {
+                "target_success": 1,
+                "physical_effect_success": 1,
+                "effect_hits": ["a"],
+            },
+            "s_add",
+            "human",
+            "ok",
+            self.contract,
+        )
+        self.assertEqual(row["physical_effect_success"], 1)
+        self.assertEqual(row["effect_hits"], ["a"])
+
+
 class CfVEditCliTest(unittest.TestCase):
     run_name = "unittest_copy_source"
 
     def tearDown(self):
         shutil.rmtree(ROOT / "predictions" / self.run_name, ignore_errors=True)
         shutil.rmtree(ROOT / "results" / self.run_name, ignore_errors=True)
+
+    def make_baseline(self):
+        subprocess.run(
+            [sys.executable, "baselines/copy_source.py", "--run-name", self.run_name],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
 
     def run_cli(self, *args):
         return subprocess.run(
@@ -129,6 +218,57 @@ class CfVEditCliTest(unittest.TestCase):
         self.assertEqual(summary["edit_success"], 0)
         self.assertIn("保不变量", summary)
         self.assertIn("命中后果", summary)
+
+    def test_human_only_run_reports_with_judge_human(self):
+        self.make_baseline()
+        sample_ids = [row["sample_id"] for row in read_jsonl(ROOT / "manifest.jsonl")]
+        human_input = ROOT / "predictions" / self.run_name / "human_input.jsonl"
+        with human_input.open("w", encoding="utf-8") as handle:
+            for sample_id in sample_ids:
+                handle.write(json.dumps({
+                    "sample_id": sample_id,
+                    "target_success": 0,
+                    "preservation_success": 1,
+                    "effect_hits": [],
+                    "physical_effect_success": 0,
+                    "temporal_consistency": 1,
+                    "major_artifacts": 0,
+                    "overall_pass": 0,
+                }) + "\n")
+
+        # Reporting before any human scores must point at the right file.
+        missing = subprocess.run(
+            [sys.executable, "bench.py", "report", self.run_name, "--judge", "human"],
+            cwd=ROOT, text=True, capture_output=True,
+        )
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn("human_per_sample.jsonl", missing.stderr)
+
+        self.run_cli("score", self.run_name, "--judge", "human", "--judge-output", str(human_input))
+        self.assertTrue((ROOT / "results" / self.run_name / "human_per_sample.jsonl").exists())
+
+        self.run_cli("report", self.run_name, "--judge", "human")
+        summary = json.loads(
+            (ROOT / "results" / self.run_name / "summary.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(summary["judge"], "human")
+        self.assertEqual(summary["n"], 12)
+        self.assertEqual(summary["preservation_axis"], 1)
+        self.assertEqual(summary["consequence_axis"], 0)
+
+    def test_duplicate_prediction_row_rejected(self):
+        self.make_baseline()
+        predictions_path = ROOT / "predictions" / self.run_name / "predictions.jsonl"
+        lines = predictions_path.read_text(encoding="utf-8").splitlines(keepends=True)
+        with predictions_path.open("a", encoding="utf-8") as handle:
+            handle.write(lines[0])  # duplicate the first sample_id row
+
+        result = subprocess.run(
+            [sys.executable, "bench.py", "validate", self.run_name],
+            cwd=ROOT, text=True, capture_output=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("duplicate sample_id", result.stderr)
 
 
 if __name__ == "__main__":

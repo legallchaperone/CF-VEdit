@@ -48,12 +48,17 @@ python bench.py list
 python bench.py validate <run_name>
 python bench.py score <run_name> --judge vlm     # OpenRouter / Gemini 2.5 Pro
 python bench.py score <run_name> --judge human   # built-in local web UI
-python bench.py report <run_name>
+python bench.py report <run_name> --judge vlm    # aggregate VLM scores (default)
+python bench.py report <run_name> --judge human  # aggregate human scores
 python bench.py agree <run_name>                 # human vs VLM agreement
 ```
 
-Pick the judge with `--judge`. Both write the same per-sample schema, so you can
-run either (or both, then `agree`).
+Pick the judge with `--judge`. Both judges write the same per-sample schema, so
+you can run either (or both, then `agree`). `score --judge vlm` writes
+`per_sample.jsonl` and `score --judge human` writes `human_per_sample.jsonl`;
+`report --judge` selects which of the two to aggregate (it defaults to `vlm`, so
+a human-only run must be reported with `report <run_name> --judge human`). The
+chosen judge is recorded in `summary.json` and the leaderboard.
 
 ### VLM judge (OpenRouter / Gemini 2.5 Pro)
 
