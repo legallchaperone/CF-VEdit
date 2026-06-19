@@ -43,6 +43,9 @@ jobs:
       - name: Import e2w_core
         working-directory: e2w/packages/e2w_core
         run: python -c "import e2w_core; from e2w_core import MaskLayer, resolve_pixel, Operation, io_contract; print('e2w_core OK')"
+      - name: e2w_core contract tests
+        working-directory: e2w/packages/e2w_core
+        run: python -m unittest discover -s tests -v
 
   boundaries:
     # Dependency-direction graph — B3 (halves independent) + e2w_core inward.
