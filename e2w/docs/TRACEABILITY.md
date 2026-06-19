@@ -15,9 +15,9 @@ acceptance gate in [docs/build/05-acceptance-and-tasks.md](build/05-acceptance-a
 
 | claim | module | guarding test | status |
 |---|---|---|---|
-| ① abduction = source inversion to latent as invariant prior (the U) | `generation/e2w_generation/latent` + `e2w_core.latent` | inversion round-trip error + UNCHANGED-region latent match | ⬜ |
-| ② the **indirect / multi-hop** layer of the three-layer mask (the 命门) | `localization` (change A) + `data_engine` (dependency-graph labels) | predicted indirect mask aligns to sim dependency graph | ⬜ |
-| ③ abduction-bound invariant-preservation loss | `generation/e2w_generation/losses` | `不改变` region V̂ latent must equal source latent | ⬜ |
+| ① abduction = source inversion to latent as invariant prior (the U) | `generation/e2w_generation/abduction.py` + `generation/e2w_generation/renderer.py` + `e2w_core.latent` | V0 smoke: Wan source latent materialized; UNCHANGED latent paste-back callback installed | ◑ V0 vanilla only |
+| ② the **indirect / multi-hop** layer of the three-layer mask (the 命门) | `localization/e2w_localization/planner.py` (stock Sa2VA [SEG] → direct; indirect empty) + `data_engine` TODO | predicted indirect mask aligns to sim dependency graph | ◑ V0 bypasses indirect |
+| ③ abduction-bound invariant-preservation loss | `generation/e2w_generation/losses` | `不改变` region V̂ latent must equal source latent | ⏸ no training in V0 |
 
 ## Shared contracts (e2w_core — the seam)
 
@@ -42,13 +42,14 @@ acceptance gate in [docs/build/05-acceptance-and-tasks.md](build/05-acceptance-a
 |---|---|---|---|
 | B1 benchmark imports 0 model packages | — | import-linter contract (`pyproject.toml`) | ◑ contract written, CI wiring TODO |
 | B3 localization ⟂ generation | — | import-linter independence contract | ◑ |
-| B4 vendored upstream has no in-place diff | `third_party/` | CI third_party-clean check | ⬜ (no vendor yet) |
+| B4 vendored upstream has no in-place diff | `third_party/` (`sa2va`, `vace`, `wan2_2`, `videox_fun`) | CI third_party-clean check | ◑ upstream added as submodules; no in-place edits for V0 |
 | B5 train/eval sources disjoint | `provenance.jsonl` | leakage check | ◑ provenance carries evidence; cross-source check TODO |
 
 ## Pipeline & training
 
 | claim | module | guarding test | status |
 |---|---|---|---|
-| render seam solved in one pass (feather + joint denoise, no 2nd-pass) | `generation/e2w_generation/renderer` | seam-artifact eval | ⬜ |
-| three-stage training (align → end-to-end → optional RL) | `integration/pipelines` + `configs/` | training smoke | ⬜ |
+| render seam solved in one pass (feather + joint denoise, no 2nd-pass) | `generation/e2w_generation/renderer.py` | V0 prediction run validates; human eval pending | ◑ V0 uses VACE mask + source-latent paste-back, no trained seam eval |
+| three-stage training (align → end-to-end → optional RL) | `integration/pipelines` + `configs/` | training smoke | ⏸ no training in V0 |
+| V0 vanilla eval path writes benchmark `predictions/<run>/` without benchmark imports | `integration/adapters/e2w_adapter.py` + `integration/pipelines/e2w_pipeline.py` + `configs/vanilla.v0.json` | `bench.py validate e2w_vanilla_v0` | ✅ run produced 12/12 valid videos; human judge launched |
 | Rung-3 gate: same instruction, two sources → different GT | `cf_vedit_bench` (`pair_id`) | reserved | ⏸ see SCOPE |

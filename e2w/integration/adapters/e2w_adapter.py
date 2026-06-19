@@ -1,0 +1,229 @@
+#!/usr/bin/env python3
+"""Run E2W V0 vanilla over the CF-VEdit benchmark and write predictions/<run>.
+
+Boundary B1 is preserved: the benchmark consumes files; it never imports E2W.
+This adapter is producer-side integration code and writes the disk contract via
+`e2w_core.io_contract`.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import traceback
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+E2W_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = E2W_ROOT.parent
+for rel in ("packages/e2w_core", "packages/localization", "packages/generation", "."):
+    p = E2W_ROOT / rel
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
+
+from e2w_core.io_contract import (  # noqa: E402
+    BENCHMARK_VERSION,
+    PREDICTIONS_INDEX,
+    PREDICTIONS_VIDEO_DIR,
+    RUN_META,
+    STATUS_OK,
+    PredictionRow,
+)
+from integration.pipelines.e2w_pipeline import build_v0_pipeline  # noqa: E402
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    rows = []
+    for line in path.read_text().splitlines():
+        if line.strip():
+            rows.append(json.loads(line))
+    return rows
+
+
+def write_json(path: Path, obj: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+
+
+def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in rows))
+
+
+def manifest_sha256(manifest: Path) -> str:
+    return hashlib.sha256(manifest.read_bytes()).hexdigest()
+
+
+def render_worker(job_path: Path) -> int:
+    import numpy as np
+    from e2w_core.masks import ThreeLayerMask
+
+    job = json.loads(job_path.read_text())
+    pipeline = build_v0_pipeline(job["config"])
+    arrays = np.load(job["mask_npz"], allow_pickle=False)
+    mask = ThreeLayerMask(direct=arrays["direct"].astype(bool), indirect=arrays["indirect"].astype(bool))
+    source = pipeline.abductor.invert(job["source_path"])
+    pipeline.renderer.render(source, job["instruction"], mask, out_path=job["out_path"])
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Run E2W V0 vanilla benchmark adapter")
+    parser.add_argument("--run-name", default="e2w_vanilla_v0")
+    parser.add_argument("--config", default=str(E2W_ROOT / "configs" / "vanilla.v0.json"))
+    parser.add_argument("--benchmark-root", default=str(REPO_ROOT / "physics_iq_for_simple_eval"))
+    parser.add_argument("--sample-id", action="append", help="Run only selected sample id(s); repeatable")
+    parser.add_argument("--sample-limit", type=int, help="Run only the first N manifest rows")
+    parser.add_argument("--overwrite", action="store_true", help="Remove an existing predictions/<run-name> before writing")
+    parser.add_argument("--continue-on-error", action="store_true", help="Write failed rows instead of aborting on first sample error")
+    parser.add_argument("--vanilla", action="store_true", help="Required guard: run the V0 vanilla path")
+    parser.add_argument("--render-worker-json", help=argparse.SUPPRESS)
+    args = parser.parse_args(argv)
+
+    if args.render_worker_json:
+        return render_worker(Path(args.render_worker_json).resolve())
+
+    if not args.vanilla:
+        parser.error("V0 adapter requires --vanilla to make the bypass explicit")
+
+    benchmark_root = Path(args.benchmark_root).resolve()
+    manifest_path = benchmark_root / "manifest.jsonl"
+    if not manifest_path.exists():
+        raise FileNotFoundError(manifest_path)
+
+    run_dir = benchmark_root / "predictions" / args.run_name
+    videos_dir = run_dir / PREDICTIONS_VIDEO_DIR
+    masks_dir = run_dir / "e2w_masks"
+    jobs_dir = run_dir / "e2w_render_jobs"
+    if run_dir.exists():
+        if not args.overwrite:
+            raise FileExistsError(f"prediction run exists; pass --overwrite: {run_dir}")
+        shutil.rmtree(run_dir)
+    videos_dir.mkdir(parents=True, exist_ok=True)
+    masks_dir.mkdir(parents=True, exist_ok=True)
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+
+    manifest_rows = read_jsonl(manifest_path)
+    if args.sample_id:
+        wanted = set(args.sample_id)
+        manifest_rows = [row for row in manifest_rows if row["sample_id"] in wanted]
+    if args.sample_limit is not None:
+        manifest_rows = manifest_rows[: args.sample_limit]
+
+    write_json(
+        run_dir / RUN_META,
+        {
+            "run_name": args.run_name,
+            "benchmark_version": BENCHMARK_VERSION,
+            "manifest_sha256": manifest_sha256(manifest_path),
+            "model_name": "E2W V0 vanilla: Sa2VA [SEG] + Wan2.2 VACE-Fun with latent paste-back",
+            "model_version": "v0-vanilla-eval",
+            "created_at": utc_now(),
+            "num_samples": len(manifest_rows),
+            "command": " ".join(sys.argv),
+            "config": str(Path(args.config).resolve()),
+            "adapter": str(Path(__file__).resolve()),
+            "status_policy": "continue-on-error" if args.continue_on_error else "abort-on-error",
+        },
+    )
+
+    pipeline = build_v0_pipeline(args.config)
+    prediction_rows: list[dict[str, Any]] = []
+    planned: dict[str, tuple[dict[str, Any], str, str]] = {}
+    failures: dict[str, PredictionRow] = {}
+
+    # Stage 1: Sa2VA localization only. Keep Wan/VACE unloaded, then release Sa2VA
+    # before the 14B renderer enters GPU memory.
+    for row in manifest_rows:
+        sample_id = row["sample_id"]
+        video_name = f"{sample_id}.mp4"
+        source_path = benchmark_root / "videos" / "source" / video_name
+        instruction = row["instruction"]
+        target_ref = row.get("target_ref") or row.get("target") or instruction
+        operation = row.get("operation", "attribute")
+        try:
+            print(f"[e2w-adapter] localize {sample_id}: {instruction}", flush=True)
+            import numpy as np
+
+            mask, _plan = pipeline.planner.plan(
+                source_path,
+                instruction,
+                target_ref=target_ref,
+                operation=operation,
+                vanilla=True,
+            )
+            mask_path = masks_dir / f"{sample_id}.npz"
+            np.savez_compressed(mask_path, direct=mask.direct.astype(bool), indirect=mask.indirect.astype(bool))
+            planned[sample_id] = (row, str(source_path), str(mask_path))
+        except Exception as exc:  # noqa: BLE001 - persisted for benchmark failure accounting.
+            err = f"localization {type(exc).__name__}: {exc}"
+            traceback.print_exc()
+            failures[sample_id] = PredictionRow(sample_id=sample_id, video=None, status="failed", error=err)
+            if not args.continue_on_error:
+                prediction_rows.append(failures[sample_id].to_json())
+                write_jsonl(run_dir / PREDICTIONS_INDEX, prediction_rows)
+                return 1
+
+    pipeline.planner.unload()
+
+    # Stage 2: Wan/VACE rendering. Sa2VA is no longer resident.
+    for row in manifest_rows:
+        sample_id = row["sample_id"]
+        video_name = f"{sample_id}.mp4"
+        out_rel = f"{PREDICTIONS_VIDEO_DIR}/{video_name}"
+        out_path = run_dir / out_rel
+        if sample_id in failures:
+            prediction_rows.append(failures[sample_id].to_json())
+            write_jsonl(run_dir / PREDICTIONS_INDEX, prediction_rows)
+            continue
+
+        instruction = row["instruction"]
+        try:
+            print(f"[e2w-adapter] render {sample_id}: {instruction}", flush=True)
+            _row, source_path_str, mask_path_str = planned[sample_id]
+            job_path = jobs_dir / f"{sample_id}.json"
+            write_json(
+                job_path,
+                {
+                    "config": str(Path(args.config).resolve()),
+                    "source_path": source_path_str,
+                    "mask_npz": mask_path_str,
+                    "instruction": instruction,
+                    "out_path": str(out_path),
+                },
+            )
+            env = os.environ.copy()
+            env.setdefault("TOKENIZERS_PARALLELISM", "false")
+            proc = subprocess.run(
+                [sys.executable, str(Path(__file__).resolve()), "--render-worker-json", str(job_path)],
+                cwd=str(E2W_ROOT),
+                env=env,
+            )
+            if proc.returncode != 0:
+                raise RuntimeError(f"render worker exited with code {proc.returncode}")
+            pred = PredictionRow(sample_id=sample_id, video=out_rel, status=STATUS_OK, error=None)
+        except Exception as exc:  # noqa: BLE001 - persisted for benchmark failure accounting.
+            err = f"render {type(exc).__name__}: {exc}"
+            traceback.print_exc()
+            pred = PredictionRow(sample_id=sample_id, video=None, status="failed", error=err)
+            if not args.continue_on_error:
+                prediction_rows.append(pred.to_json())
+                write_jsonl(run_dir / PREDICTIONS_INDEX, prediction_rows)
+                return 1
+        prediction_rows.append(pred.to_json())
+        write_jsonl(run_dir / PREDICTIONS_INDEX, prediction_rows)
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

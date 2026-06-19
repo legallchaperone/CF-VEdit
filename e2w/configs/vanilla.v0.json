@@ -1,0 +1,33 @@
+{
+  "version": "v0-vanilla-eval",
+  "weights_config": "weights.v0.json",
+  "device": "cuda:0",
+  "dtype": "bfloat16",
+  "localization": {
+    "frame_interval": 1,
+    "max_frames_for_segmentation": 21,
+    "initialize_bypassed_heads": true,
+    "edit_token_slots": 4,
+    "renderer_condition_dim": 4096,
+    "segmentation_prompt_template": "<image>Please segment {target_ref}. [SEG]"
+  },
+  "generation": {
+    "videox_fun_root": "packages/generation/third_party/videox_fun",
+    "config_path": "packages/generation/third_party/videox_fun/config/wan2.2/wan_civitai_t2v.yaml",
+    "sample_size": [480, 832],
+    "fps": 12,
+    "num_inference_steps": 20,
+    "guidance_scale": 5.0,
+    "negative_prompt": "low quality, blurry, artifacts, distorted, text, watermark, static frame",
+    "sampler_name": "Flow",
+    "shift": 12.0,
+    "gpu_memory_mode": "sequential_cpu_offload",
+    "enable_teacache": true,
+    "teacache_threshold": 0.10,
+    "num_skip_start_steps": 5,
+    "cfg_skip_ratio": 0,
+    "vace_context_scale": 1.0,
+    "paste_back_source_latent": true,
+    "seed": 43
+  }
+}
