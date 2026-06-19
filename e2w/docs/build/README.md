@@ -66,10 +66,14 @@ packages/generation/e2w_generation/            new code
 ```
 
 **Prefer subclassing/overriding over in-place edits** (e.g. `E2WSa2VAModel(Sa2VAModel)`),
-so `third_party/` stays byte-identical to upstream (CI checks this). Only use
-`patches/` where subclassing genuinely can't reach (e.g. tokenizer/special-token
-wiring). Pin submodule commits in `.gitmodules` and the weight revisions in
-configs.
+so `third_party/` stays byte-identical to upstream. A `third_party`-clean CI guard
+(B4) is **planned, not yet wired** — it only becomes meaningful once an upstream is
+vendored, so add that job in the PR that introduces the first submodule (tracked
+⬜ in [TRACEABILITY](../TRACEABILITY.md); today's CI runs spec-test + e2w_core
+import + import-linter only). Until then this is a discipline, not an enforced
+check. Use `patches/` where subclassing genuinely can't reach (e.g. tokenizer/
+special-token wiring). Pin submodule commits in `.gitmodules` and the weight
+revisions in configs.
 
 ## Milestone map (aligns to proposal §5 / Repo-Design §5)
 

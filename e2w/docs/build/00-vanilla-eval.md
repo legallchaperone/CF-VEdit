@@ -49,17 +49,28 @@ is the experiment.
 
 ## How to run it
 
-Same harness as any model — the benchmark never imports E2W ([04] adapter, B1):
+Same harness as any model — the benchmark never imports E2W ([04] adapter, B1).
+Use the dedicated `e2w_adapter` (built per [04]); it calls the pipeline's
+`edit(..., vanilla=True)` per sample and writes `predictions/<run>/` via
+`e2w_core.io_contract`. The commands below are **illustrative** — the adapter
+module does not exist until you build it ([04]):
 
 ```bash
+# 1. run E2W in vanilla mode -> writes predictions/e2w_vanilla/
+python3 -m integration.adapters.e2w_adapter --vanilla --run-name e2w_vanilla
+
+# 2. score + report with the benchmark CLI (it only consumes the directory)
 cd physics_iq_for_simple_eval
-python3 tools/make_prediction_run.py \
-    --run-name e2w_vanilla --model-name E2W --model-version vanilla-untrained \
-    --cmd '<vanilla-mode E2W inference: {source} {instruction} -> {out}>'
 python3 bench.py validate e2w_vanilla
 python3 bench.py score  e2w_vanilla --judge vlm     # OPENROUTER_API_KEY + ffmpeg (or --judge human)
 python3 bench.py report e2w_vanilla
 ```
+
+> For *external* models (the optional baselines below) there is no in-process
+> adapter — package their outputs with the generic
+> [`tools/make_prediction_run.py`](../../../physics_iq_for_simple_eval/tools/make_prediction_run.py),
+> giving `--cmd` a **real** per-sample CLI (its `--cmd` is executed literally per
+> sample, so a placeholder string would just record failed predictions).
 
 Needs a GPU (to run E2W) + a judge backend. Record this as the **floor** run;
 eval₁ after training uses the **identical** harness (same manifest hash, judge,
