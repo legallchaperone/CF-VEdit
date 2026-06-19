@@ -18,21 +18,25 @@ version = "0.1.0"
 description = "CF-VEdit / E2W monorepo (skeleton): counterfactual video editing — abduction + do() + causal closure + invariant constraint."
 requires-python = ">=3.10"
 
+# Only packages that are importable today are listed, so `lint-imports` actually
+# runs and BLOCKS (CI enforces these — they are not faked green). cf_vedit_bench
+# is a pointer, not a package yet, so the B1 contract below is deferred until the
+# benchmark is migrated in (ADR-0002); it is tracked ◑ in docs/TRACEABILITY.md.
 [tool.importlinter]
 root_packages = [
     "e2w_core",
-    "cf_vedit_bench",
     "e2w_localization",
     "e2w_generation",
     "e2w_data_engine",
 ]
 
-# B1 — the benchmark must not import any model package.
-[[tool.importlinter.contracts]]
-name = "B1: benchmark never imports model code"
-type = "forbidden"
-source_modules = ["cf_vedit_bench"]
-forbidden_modules = ["e2w_localization", "e2w_generation"]
+# B1 — the benchmark must not import any model package. DEFERRED: re-add
+# "cf_vedit_bench" to root_packages and uncomment once it is a package (ADR-0002).
+# [[tool.importlinter.contracts]]
+# name = "B1: benchmark never imports model code"
+# type = "forbidden"
+# source_modules = ["cf_vedit_bench"]
+# forbidden_modules = ["e2w_localization", "e2w_generation"]
 
 # B3 — the two halves never import each other; they meet only at e2w_core.
 [[tool.importlinter.contracts]]
@@ -46,7 +50,6 @@ name = "e2w_core depends on nothing internal"
 type = "forbidden"
 source_modules = ["e2w_core"]
 forbidden_modules = [
-    "cf_vedit_bench",
     "e2w_localization",
     "e2w_generation",
     "e2w_data_engine",

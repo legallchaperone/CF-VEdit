@@ -35,9 +35,12 @@ e2w/
 │   ├── generation/      生成半: Abduction inversion + gated Renderer (from VACE/Wan)
 │   └── data_engine/     Kubric-style sim pairs + dependency-graph labels
 ├── integration/         端到端 pipelines + adapters → write predictions/
-├── configs/  scripts/  tools/   guards (import-linter, schema lint, proposal-link)
-└── .github/workflows/   CI: spec-test + boundary check + schema validate
+└── configs/  scripts/  tools/   guards (import-linter, schema lint, proposal-link)
 ```
+
+CI lives at the **repo-root** `.github/workflows/ci.yml` (GitHub only runs
+workflows at the repository root) during the transition; it moves into `e2w/` on
+split-out — see [ADR-0002](docs/adr/0002-scaffold-alongside-without-migration.md).
 
 ## Dependency direction (the constitution, CI-enforced)
 

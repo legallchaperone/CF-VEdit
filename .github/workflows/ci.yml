@@ -1,0 +1,63 @@
+# Drift guards as merge preconditions (Repo-Design §4⑥, e2w/AGENTS.md DoD).
+#
+# Location: this file MUST live at the repository root (.github/workflows/) — that
+# is the only place GitHub Actions discovers workflows. While the repo is in its
+# transitional shape (benchmark + e2w/ skeleton in one tree, ADR-0002), CI lives
+# here at the root, not under e2w/. On split-out it moves into e2w/.
+#
+# Every job below BLOCKS (no continue-on-error, no error-swallowing). Jobs only
+# assert what is genuinely enforceable today; the one deferred contract (B1,
+# which needs cf_vedit_bench to be a package) is documented in e2w/pyproject.toml
+# and tracked in e2w/docs/TRACEABILITY.md, not faked green here.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  spec-test:
+    # The executable spec for the benchmark — the ruler must stay true.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Benchmark spec tests (stdlib unittest; pytest not used)
+        working-directory: physics_iq_for_simple_eval
+        run: python -m unittest tests.test_cf_vedit_benchmark -v
+      - name: Schema validate (manifest + contracts)
+        working-directory: physics_iq_for_simple_eval
+        run: python bench.py validate-manifest
+
+  e2w-core:
+    # Contract layer must stay importable and behave.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Import e2w_core
+        working-directory: e2w/packages/e2w_core
+        run: python -c "import e2w_core; from e2w_core import MaskLayer, resolve_pixel, Operation, io_contract; print('e2w_core OK')"
+
+  boundaries:
+    # Dependency-direction graph — B3 (halves independent) + e2w_core inward.
+    # Blocking: a real import that violates a contract fails the build. B1
+    # (benchmark ⊥ model) activates once cf_vedit_bench is a package (ADR-0002).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install import-linter
+        run: pip install import-linter
+      - name: lint-imports
+        working-directory: e2w
+        env:
+          PYTHONPATH: packages/e2w_core:packages/localization:packages/generation:packages/data_engine
+        run: lint-imports --config pyproject.toml

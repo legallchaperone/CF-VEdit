@@ -1,7 +1,8 @@
 # tools — repo-level drift guards
 
 Machine checks that turn the proposal's boundaries into merge preconditions
-(Repo-Design §4⑥). Run in CI (`.github/workflows/ci.yml`).
+(Repo-Design §4⑥). Run in CI at the **repo-root** `.github/workflows/ci.yml`
+(GitHub only runs workflows at the repository root; ADR-0002).
 
 | guard | enforces | how |
 |---|---|---|

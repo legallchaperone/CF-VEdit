@@ -30,6 +30,11 @@ Two risks if we follow Repo-Design §1 literally right now:
    the root canonical notes. On split-out into a standalone repo, they get
    materialized as copies (the §4① intent), but not while they'd be a second copy
    in the same tree.
+3. **CI lives at the repo root, not under `e2w/`.** GitHub Actions only discovers
+   workflows in `.github/workflows/` at the *repository* root, and the real repo
+   root is the parent of `e2w/` in this transitional layout. So `ci.yml` lives at
+   the root and references the `e2w/` and `physics_iq_for_simple_eval/` subpaths;
+   it moves into `e2w/.github/` on split-out.
 
 ## Consequences
 
