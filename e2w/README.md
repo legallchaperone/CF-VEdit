@@ -9,6 +9,10 @@ invariant constraint`, not as "write the prompt in more detail".
 > **New here? Read [`docs/proposal/`](docs/proposal/README.md) first** — the four
 > design notes are the canonical source of truth. Then read [`AGENTS.md`](AGENTS.md)
 > (the repo constitution: five boundaries + change discipline).
+>
+> **Building the model?** The implementation-ready plan — edit Sa2VA, adapt
+> VACE/Wan, sim data engine, three-stage training, acceptance gates — is in
+> [`docs/build/`](docs/build/README.md).
 
 ## Status: skeleton
 
