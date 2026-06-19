@@ -23,9 +23,9 @@ acceptance gate in [docs/build/05-acceptance-and-tasks.md](build/05-acceptance-a
 
 | claim | module | guarding test | status |
 |---|---|---|---|
-| three-layer mask enum = {direct, indirect, unchanged}; priority 直接>间接>不改变 | `e2w_core.masks` | `resolve_pixel` + enum-membership test | ◑ contract defined, test TODO |
-| planner emits vectors (query + edit tokens), not masks; `Operation` matches benchmark | `e2w_core.plan` | Operation↔manifest enum parity test | ◑ |
-| model IO `predictions/` shape is one source of truth | `e2w_core.io_contract` | parity test vs `cf_vedit_bench` constants | ◑ |
+| three-layer mask enum = {direct, indirect, unchanged}; priority 直接>间接>不改变 | `e2w_core.masks` | `test_contracts.MaskContractTest` | ✅ |
+| planner emits vectors (query + edit tokens), not masks; `Operation` matches benchmark | `e2w_core.plan` | `test_contracts.OperationParityTest` | ✅ |
+| model IO `predictions/` shape is one source of truth | `e2w_core.io_contract` | `test_contracts.IoContractParityTest` | ✅ |
 
 ## Benchmark (P0 — the ruler; lives at `physics_iq_for_simple_eval/` for now)
 
