@@ -8,6 +8,9 @@ The drift radar (Repo-Design §4②). Read it two ways:
 Every PR updates this table. Status legend: ✅ done · ◑ contract/partial ·
 ⬜ not started · ⏸ deferred (see [SCOPE.md](SCOPE.md)).
 
+The ⬜/◑ model rows are turned green by the build spec — each row maps to an
+acceptance gate in [docs/build/05-acceptance-and-tasks.md](build/05-acceptance-and-tasks.md).
+
 ## The three true novelties (architecture §A.7 — the reason this beats Bernini)
 
 | claim | module | guarding test | status |
