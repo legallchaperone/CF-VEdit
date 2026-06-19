@@ -1,0 +1,24 @@
+{
+  "affected_regions": [
+    "target intervention: tennis ball",
+    "visible consequence: The tennis ball is absent while the green kinetic sand, grabber, table, and wall remain visible.",
+    "physical consequence: The sand should not be struck or dented by the falling ball."
+  ],
+  "counterfactual_state": {
+    "physical_effect": "The sand should not be struck or dented by the falling ball.",
+    "temporal": "The requested edit should remain consistent across the full edited video.",
+    "visible_outcome": "The tennis ball is absent while the green kinetic sand, grabber, table, and wall remain visible."
+  },
+  "expected_physical_effect": "The sand should not be struck or dented by the falling ball.",
+  "expected_visible_outcome": "The tennis ball is absent while the green kinetic sand, grabber, table, and wall remain visible.",
+  "operation": "remove",
+  "preserve_regions": [
+    "green kinetic sand",
+    "blue grabber tool",
+    "wooden table",
+    "plain wall"
+  ],
+  "sample_id": "piq_simple_eval_0018_remove",
+  "source_description": "A blue grabber tool holds a tennis ball above a pile of green kinetic sand on a wooden table. The grabber then releases the ball. Static shot with no camera movement.",
+  "target_ref": "tennis ball"
+}

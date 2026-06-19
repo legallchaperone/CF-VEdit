@@ -1,0 +1,12 @@
+{
+  "baseline_type": "copy_source",
+  "created_at": "2026-06-18T16:09:45Z",
+  "judge": "vlm",
+  "judge_model": "deterministic_baseline_anchor",
+  "judge_version": "0.1.0",
+  "prompt_sha256": "333461a67e7835ce0566b1ab74a37ff6fd569d03ba11c18d1e76f9afbcfeb5c6",
+  "run_name": "copy_source",
+  "source_run_model": "copy_source",
+  "source_run_version": "baseline",
+  "temperature": 0
+}

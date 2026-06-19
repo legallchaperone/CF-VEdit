@@ -1,0 +1,12 @@
+{
+  "allowed_source_roots": [
+    "physics-IQ-benchmark/full-videos",
+    "physics-IQ-benchmark/split-videos/testing"
+  ],
+  "created_at": "2026-06-12T15:04:23.883592Z",
+  "evidence_level": "VISUAL_CANDIDATE_ONLY",
+  "manifest": "/data/cwx/E2W/data/physics_iq_for_simple_eval/manifest.jsonl",
+  "review_proxy_forbidden": true,
+  "row_count": 12,
+  "vlm_prompts": "/data/cwx/E2W/data/physics_iq_for_simple_eval/vlm_judge_prompts.jsonl"
+}

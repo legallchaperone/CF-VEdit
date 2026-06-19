@@ -1,0 +1,24 @@
+{
+  "affected_regions": [
+    "target intervention: white domino",
+    "visible consequence: The white domino is absent while the blue mug and grabber tool remain visible.",
+    "physical consequence: The dark liquid should remain still with no splash or ripple from the domino."
+  ],
+  "counterfactual_state": {
+    "physical_effect": "The dark liquid should remain still with no splash or ripple from the domino.",
+    "temporal": "The requested edit should remain consistent across the full edited video.",
+    "visible_outcome": "The white domino is absent while the blue mug and grabber tool remain visible."
+  },
+  "expected_physical_effect": "The dark liquid should remain still with no splash or ripple from the domino.",
+  "expected_visible_outcome": "The white domino is absent while the blue mug and grabber tool remain visible.",
+  "operation": "remove",
+  "preserve_regions": [
+    "blue mug",
+    "dark liquid",
+    "grabber tool",
+    "wooden surface"
+  ],
+  "sample_id": "piq_simple_eval_0048_remove",
+  "source_description": "A grabber tool holding a white domino drops the domino into a dark-colored liquid in a blue mug that is on a wooden surface. Static shot with no camera movement.",
+  "target_ref": "white domino"
+}

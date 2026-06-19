@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cf_vedit_bench/contract.schema.json",
+  "title": "CF-VEdit counterfactual contract",
+  "type": "object",
+  "required": [
+    "sample_id",
+    "operation",
+    "target_ref",
+    "counterfactual_state",
+    "affected_regions",
+    "preserve_regions"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "sample_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$"
+    },
+    "operation": {
+      "enum": [
+        "remove",
+        "add",
+        "attribute",
+        "force_event"
+      ]
+    },
+    "target_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "counterfactual_state": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "affected_regions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
+    "preserve_regions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

@@ -1,0 +1,9 @@
+# Run outputs are regenerable and kept separate from read-only assets
+# (benchmark design B2: data assets vs. run outputs).
+#
+# Track only the copy_source reference baseline so the repo carries one
+# complete, validated run + leaderboard. Every other model/judge run is ignored.
+predictions/*
+!predictions/copy_source/
+results/*
+!results/copy_source/

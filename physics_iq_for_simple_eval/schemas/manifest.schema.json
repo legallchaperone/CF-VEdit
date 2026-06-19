@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cf_vedit_bench/manifest.schema.json",
+  "title": "CF-VEdit manifest row",
+  "type": "object",
+  "required": [
+    "sample_id",
+    "source_video",
+    "operation",
+    "instruction",
+    "target_ref",
+    "split",
+    "category"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "sample_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$"
+    },
+    "source_video": {
+      "type": "string"
+    },
+    "operation": {
+      "enum": [
+        "remove",
+        "add",
+        "attribute",
+        "force_event"
+      ]
+    },
+    "instruction": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "split": {
+      "enum": [
+        "train",
+        "val",
+        "test"
+      ]
+    },
+    "category": {
+      "type": "string"
+    },
+    "scene_type": {
+      "type": "string"
+    },
+    "difficulty": {
+      "enum": [
+        "easy",
+        "medium",
+        "hard"
+      ]
+    },
+    "identifiability": {
+      "enum": [
+        "identifiable",
+        "underdetermined"
+      ]
+    },
+    "pair_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "video_meta": {
+      "type": "object",
+      "required": [
+        "fps",
+        "num_frames",
+        "width",
+        "height"
+      ],
+      "properties": {
+        "fps": {
+          "type": "number"
+        },
+        "num_frames": {
+          "type": "integer"
+        },
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        }
+      }
+    },
+    "contract": {
+      "type": "string"
+    },
+    "annotations": {
+      "type": "object",
+      "properties": {
+        "target_mask": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "affected_mask": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "preserve_mask": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}

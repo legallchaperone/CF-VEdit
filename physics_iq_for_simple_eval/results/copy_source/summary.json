@@ -1,0 +1,74 @@
+{
+  "benchmark_version": "0.1.0",
+  "by_category": {
+    "Fluid Dynamics": {
+      "consequence_axis": 0.0,
+      "edit_success": 0.0,
+      "failure_rate": 0.0,
+      "missing": 0,
+      "n": 4,
+      "physical_effect": 0.0,
+      "preservation_axis": 1.0,
+      "quality": 1.0
+    },
+    "Solid Mechanics": {
+      "consequence_axis": 0.0,
+      "edit_success": 0.0,
+      "failure_rate": 0.0,
+      "missing": 0,
+      "n": 8,
+      "physical_effect": 0.0,
+      "preservation_axis": 1.0,
+      "quality": 1.0
+    }
+  },
+  "by_difficulty": {
+    "medium": {
+      "consequence_axis": 0.0,
+      "edit_success": 0.0,
+      "failure_rate": 0.0,
+      "missing": 0,
+      "n": 12,
+      "physical_effect": 0.0,
+      "preservation_axis": 1.0,
+      "quality": 1.0
+    }
+  },
+  "by_operation": {
+    "add": {
+      "consequence_axis": 0.0,
+      "edit_success": 0.0,
+      "failure_rate": 0.0,
+      "missing": 0,
+      "n": 6,
+      "physical_effect": 0.0,
+      "preservation_axis": 1.0,
+      "quality": 1.0
+    },
+    "remove": {
+      "consequence_axis": 0.0,
+      "edit_success": 0.0,
+      "failure_rate": 0.0,
+      "missing": 0,
+      "n": 6,
+      "physical_effect": 0.0,
+      "preservation_axis": 1.0,
+      "quality": 1.0
+    }
+  },
+  "consequence_axis": 0.0,
+  "created_at": "2026-06-18T16:09:48Z",
+  "edit_success": 0.0,
+  "failure_rate": 0.0,
+  "missing": 0,
+  "n": 12,
+  "physical_effect": 0.0,
+  "preservation_axis": 1.0,
+  "quality": 1.0,
+  "run_name": "copy_source",
+  "保不变量": 1.0,
+  "命中后果": 0.0,
+  "物理可信": 0.0,
+  "编辑落地": 0.0,
+  "质量": 1.0
+}

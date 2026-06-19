@@ -1,0 +1,24 @@
+{
+  "affected_regions": [
+    "target intervention: small clamp",
+    "visible consequence: A clamp appears holding the released Newton's cradle balls.",
+    "physical consequence: The cradle collision should be prevented or visibly altered."
+  ],
+  "counterfactual_state": {
+    "physical_effect": "The cradle collision should be prevented or visibly altered.",
+    "temporal": "The requested edit should remain consistent across the full edited video.",
+    "visible_outcome": "A clamp appears holding the released Newton's cradle balls."
+  },
+  "expected_physical_effect": "The cradle collision should be prevented or visibly altered.",
+  "expected_visible_outcome": "A clamp appears holding the released Newton's cradle balls.",
+  "operation": "add",
+  "preserve_regions": [
+    "Newton's cradle frame",
+    "metal balls",
+    "table",
+    "grabber tool"
+  ],
+  "sample_id": "piq_simple_eval_0251_add",
+  "source_description": "A Newton's cradle device on the table and two of the metal balls are held up by a blue handled grabber tool. The claw releases the two balls. Static shot with no camera movement.",
+  "target_ref": "small clamp"
+}

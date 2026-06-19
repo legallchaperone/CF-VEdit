@@ -1,0 +1,24 @@
+{
+  "affected_regions": [
+    "target intervention: heavy red block",
+    "visible consequence: A red block appears at the first domino contact area.",
+    "physical consequence: The rotating stick or first domino should be blocked or visibly altered."
+  ],
+  "counterfactual_state": {
+    "physical_effect": "The rotating stick or first domino should be blocked or visibly altered.",
+    "temporal": "The requested edit should remain consistent across the full edited video.",
+    "visible_outcome": "A red block appears at the first domino contact area."
+  },
+  "expected_physical_effect": "The rotating stick or first domino should be blocked or visibly altered.",
+  "expected_visible_outcome": "A red block appears at the first domino contact area.",
+  "operation": "add",
+  "preserve_regions": [
+    "domino rows",
+    "rotating platform",
+    "wooden table",
+    "background"
+  ],
+  "sample_id": "piq_simple_eval_0051_add",
+  "source_description": "Two rows of alternating black and white dominoes are set up on a wooden table with a gap between the two rows. A wooden stick attached to a rotating platform rotates clockwise and knocks the first domino in the first row. Static shot with no camera movement.",
+  "target_ref": "heavy red block"
+}

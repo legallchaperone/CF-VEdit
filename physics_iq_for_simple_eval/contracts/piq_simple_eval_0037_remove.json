@@ -1,0 +1,24 @@
+{
+  "affected_regions": [
+    "target intervention: black balloon",
+    "visible consequence: The black balloon is absent while the pump hose, table, and wall remain visible.",
+    "physical consequence: No balloon expansion should occur."
+  ],
+  "counterfactual_state": {
+    "physical_effect": "No balloon expansion should occur.",
+    "temporal": "The requested edit should remain consistent across the full edited video.",
+    "visible_outcome": "The black balloon is absent while the pump hose, table, and wall remain visible."
+  },
+  "expected_physical_effect": "No balloon expansion should occur.",
+  "expected_visible_outcome": "The black balloon is absent while the pump hose, table, and wall remain visible.",
+  "operation": "remove",
+  "preserve_regions": [
+    "air pump hose",
+    "table",
+    "plain wall",
+    "camera framing"
+  ],
+  "sample_id": "piq_simple_eval_0037_remove",
+  "source_description": "A black balloon is attached to a fixed electric air pump hose on a table with a plain wall in the background. Air is being pumped in the balloon. Static shot with no camera movement.",
+  "target_ref": "black balloon"
+}

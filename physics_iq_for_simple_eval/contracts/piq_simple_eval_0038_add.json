@@ -1,0 +1,24 @@
+{
+  "affected_regions": [
+    "target intervention: red clamp",
+    "visible consequence: A red clamp appears around the balloon.",
+    "physical consequence: The balloon expansion should be visibly constrained by the clamp."
+  ],
+  "counterfactual_state": {
+    "physical_effect": "The balloon expansion should be visibly constrained by the clamp.",
+    "temporal": "The requested edit should remain consistent across the full edited video.",
+    "visible_outcome": "A red clamp appears around the balloon."
+  },
+  "expected_physical_effect": "The balloon expansion should be visibly constrained by the clamp.",
+  "expected_visible_outcome": "A red clamp appears around the balloon.",
+  "operation": "add",
+  "preserve_regions": [
+    "black balloon",
+    "air pump hose",
+    "table",
+    "plain wall"
+  ],
+  "sample_id": "piq_simple_eval_0038_add",
+  "source_description": "A black balloon is attached to a fixed electric air pump hose on a table with a plain wall in the background. Air is being pumped in the balloon. Static shot with no camera movement.",
+  "target_ref": "red clamp"
+}

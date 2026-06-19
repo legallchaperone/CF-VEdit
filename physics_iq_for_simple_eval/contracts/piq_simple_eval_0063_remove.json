@@ -1,0 +1,23 @@
+{
+  "affected_regions": [
+    "target intervention: yellow rubber duck",
+    "visible consequence: The duck is absent from the tabletop.",
+    "physical consequence: The tabletop remains stable with no new moving object in the duck location."
+  ],
+  "counterfactual_state": {
+    "physical_effect": "The tabletop remains stable with no new moving object in the duck location.",
+    "temporal": "The requested edit should remain consistent across the full edited video.",
+    "visible_outcome": "The duck is absent from the tabletop."
+  },
+  "expected_physical_effect": "The tabletop remains stable with no new moving object in the duck location.",
+  "expected_visible_outcome": "The duck is absent from the tabletop.",
+  "operation": "remove",
+  "preserve_regions": [
+    "wooden table",
+    "plain background",
+    "lighting"
+  ],
+  "sample_id": "piq_simple_eval_0063_remove",
+  "source_description": "A stationary yellow rubber duck on a light brown wooden table against a plain white background. Static shot with no camera movement.",
+  "target_ref": "yellow rubber duck"
+}
