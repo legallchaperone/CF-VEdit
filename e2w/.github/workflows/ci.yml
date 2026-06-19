@@ -1,0 +1,54 @@
+# CI scaffold — drift guards as merge preconditions (Repo-Design §4⑥, AGENTS.md DoD).
+#
+# Scope note: jobs that need code/vendored upstreams not present yet are marked
+# `continue-on-error` so the skeleton stays green while still showing the intended
+# gates. Flip these to hard-fail as each package lands.
+name: e2w-ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  spec-test:
+    # The executable spec for the benchmark — must always be green.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Benchmark spec tests (stdlib unittest; pytest not used)
+        working-directory: physics_iq_for_simple_eval
+        run: python -m unittest tests.test_cf_vedit_benchmark -v
+      - name: Schema validate (manifest + contracts)
+        working-directory: physics_iq_for_simple_eval
+        run: python bench.py validate-manifest
+
+  e2w-core:
+    # Contract layer must stay importable and dependency-light.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Import e2w_core
+        working-directory: e2w/packages/e2w_core
+        run: python -c "import e2w_core; from e2w_core import MaskLayer, resolve_pixel, Operation, io_contract; print('e2w_core OK')"
+
+  boundaries:
+    # Dependency-direction graph (B1, B3, e2w_core inward).
+    runs-on: ubuntu-latest
+    continue-on-error: true  # aspirational until packages are importable on one path
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: import-linter
+        working-directory: e2w
+        run: |
+          pip install import-linter
+          lint-imports || echo "boundaries not yet wired (skeleton)"

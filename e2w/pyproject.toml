@@ -1,0 +1,53 @@
+# e2w workspace root.
+#
+# This declares the packages and, crucially, the dependency DIRECTION the repo is
+# allowed to have (Repo-Design §2). The machine-checked form lives in
+# `.importlinter`; this file is the human-readable index + tool config.
+#
+# Packages (each has, or will have, its own pyproject):
+#   packages/e2w_core        contracts — depends on nothing internal (the seam)
+#   packages/cf_vedit_bench  benchmark — consumes predictions/, imports no model
+#   packages/localization    定位半 (Sa2VA-based)        -> e2w_core only
+#   packages/generation      生成半 (VACE/Wan-based)      -> e2w_core only
+#   packages/data_engine     sim engine (Kubric-style)   -> e2w_core only
+#   integration              pipelines + adapters        -> e2w_core, both halves
+
+[project]
+name = "e2w"
+version = "0.1.0"
+description = "CF-VEdit / E2W monorepo (skeleton): counterfactual video editing — abduction + do() + causal closure + invariant constraint."
+requires-python = ">=3.10"
+
+[tool.importlinter]
+root_packages = [
+    "e2w_core",
+    "cf_vedit_bench",
+    "e2w_localization",
+    "e2w_generation",
+    "e2w_data_engine",
+]
+
+# B1 — the benchmark must not import any model package.
+[[tool.importlinter.contracts]]
+name = "B1: benchmark never imports model code"
+type = "forbidden"
+source_modules = ["cf_vedit_bench"]
+forbidden_modules = ["e2w_localization", "e2w_generation"]
+
+# B3 — the two halves never import each other; they meet only at e2w_core.
+[[tool.importlinter.contracts]]
+name = "B3: localization and generation are independent"
+type = "independence"
+modules = ["e2w_localization", "e2w_generation"]
+
+# e2w_core is the narrow waist: it depends on nothing internal.
+[[tool.importlinter.contracts]]
+name = "e2w_core depends on nothing internal"
+type = "forbidden"
+source_modules = ["e2w_core"]
+forbidden_modules = [
+    "cf_vedit_bench",
+    "e2w_localization",
+    "e2w_generation",
+    "e2w_data_engine",
+]
