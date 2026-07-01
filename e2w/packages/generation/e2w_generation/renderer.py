@@ -22,6 +22,26 @@ from e2w_core.masks import ThreeLayerMask
 from .abduction import WanSourcePayload
 
 
+def encode_source_to_latent(pipeline: Any, source_video: Any, *, height: int, width: int,
+                            weight_dtype: Any, device: Any):
+    """VACE/Wan VAE-encode a source video tensor ``(b,c,f,h,w)`` to its latent.
+
+    The abduction U-prior (architecture A.2【1】) and the renderer paste-back gate
+    both need this exact encode; single-source it so the G1 round-trip
+    (``decode(invert(V)) ≈ V``, 02:91) exercises the same path the renderer runs.
+    """
+    import torch
+    from einops import rearrange
+
+    source_video = source_video.to(dtype=weight_dtype)
+    init_video = pipeline.image_processor.preprocess(
+        rearrange(source_video, "b c f h w -> (b f) c h w"), height=height, width=width
+    ).to(dtype=weight_dtype)
+    init_video = rearrange(init_video, "(b f) c h w -> b c f h w", f=source_video.shape[2]).to(device=device)
+    source_latents_list = pipeline.vace_encode_frames(init_video, ref_images=None, masks=None, vae=pipeline.vae)
+    return torch.stack(source_latents_list, dim=0).to(device=device, dtype=weight_dtype)
+
+
 @dataclass(frozen=True)
 class RendererConfig:
     weights_path: str
@@ -43,6 +63,12 @@ class RendererConfig:
     cfg_skip_ratio: float | None = 0
     vace_context_scale: float = 1.0
     paste_back_source_latent: bool = True
+    # Spec 02:52 — paste the source latent NOISED to the current timestep
+    # (flow-matching), not clean x0. Off restores the legacy clean-paste behavior.
+    paste_noise_to_timestep: bool = True
+    # Spec 02:61-63 — feather the paste-back boundary (soft latent mask) for a joint
+    # denoise seam instead of a hard nearest-neighbour gate.
+    mask_feather_latent: bool = True
     seed: int = 43
 
 
@@ -51,11 +77,13 @@ class GatedRenderer:
         self.config = config
         self._backend: dict[str, Any] | None = None
 
-    def render(self, source: SourceLatent, edit_condition: str, mask: ThreeLayerMask, *, out_path: str | Path) -> Path:
+    def render(self, source: SourceLatent, edit_condition: "str | Any", mask: ThreeLayerMask, *, out_path: str | Path) -> Path:
         """Render one edited video and save it to out_path.
 
-        `edit_condition` is the native VACE text prompt in vanilla mode. `mask`
-        uses E2W seam semantics; DIRECT∪INDIRECT becomes VACE's inpaint region.
+        `edit_condition` is the native VACE **text prompt** (vanilla mode) OR the
+        planner's `edit_tokens` tensor of shape (Nt, 4096) (full A.1 mode), fed as the
+        positive cross-attention condition. `mask` uses E2W seam semantics;
+        DIRECT∪INDIRECT becomes VACE's inpaint region.
         """
         import torch
         from einops import rearrange
@@ -91,8 +119,20 @@ class GatedRenderer:
             width=sample_size[1],
             weight_dtype=weight_dtype,
             device=device,
+            feather_latent=self.config.mask_feather_latent,
         )
         payload.latents = source_latents
+
+        generator = torch.Generator(device=device).manual_seed(int(self.config.seed))
+
+        # A fixed noise tensor for the noised paste-back. Drawn from a separate
+        # generator so the pipeline's own init-noise stream is left byte-identical.
+        paste_noise = None
+        if self.config.paste_back_source_latent and self.config.paste_noise_to_timestep:
+            noise_gen = torch.Generator(device=device).manual_seed(int(self.config.seed) + 1)
+            paste_noise = torch.randn(
+                source_latents.shape, generator=noise_gen, device=device, dtype=source_latents.dtype
+            )
 
         callback = None
         if self.config.paste_back_source_latent:
@@ -100,31 +140,69 @@ class GatedRenderer:
                 latents = callback_kwargs["latents"]
                 src = source_latents.to(device=latents.device, dtype=latents.dtype)
                 m = latent_mask.to(device=latents.device, dtype=latents.dtype)
+                if paste_noise is not None:
+                    # Spec 02:52 — paste source NOISED to the working timestep, not clean.
+                    # The callback fires after scheduler.step, so `latents` already sit at
+                    # the next sigma (sigmas[step_index+1]); flow-matching noising is
+                    # x_sigma = (1-sigma)*x0 + sigma*noise (cf. fm_solvers.add_noise:
+                    # alpha_t*x0 + sigma_t*noise with alpha_t=1-sigma). Clean paste (old
+                    # behavior) drops a denoised region beside a noisy one and corrupts
+                    # the boundary each step → the preservation collapse.
+                    sigma = self._next_sigma(pipe.scheduler, step_index)
+                    src = (1.0 - sigma) * src + sigma * paste_noise.to(
+                        device=latents.device, dtype=latents.dtype
+                    )
                 callback_kwargs["latents"] = (1.0 - m) * src + m * latents
                 return callback_kwargs
             callback = paste_back_callback
 
-        generator = torch.Generator(device=device).manual_seed(int(self.config.seed))
-        with torch.no_grad():
-            sample = pipeline(
-                edit_condition,
-                num_frames=source_video.shape[2],
-                negative_prompt=self.config.negative_prompt,
-                height=sample_size[0],
-                width=sample_size[1],
-                generator=generator,
-                guidance_scale=float(self.config.guidance_scale),
-                num_inference_steps=int(self.config.num_inference_steps),
-                video=source_video,
-                mask_video=mask_video,
-                control_video=None,
-                subject_ref_images=None,
-                boundary=backend["boundary"],
-                shift=float(self.config.shift),
-                vace_context_scale=float(self.config.vace_context_scale),
-                callback_on_step_end=callback,
-                callback_on_step_end_tensor_inputs=["latents"],
-            ).videos
+        # Full A.1: feed the planner's edit_tokens as the POSITIVE cross-attn condition.
+        # The VACE-Fun pipeline's external prompt_embeds path is brittle (it does
+        # `batch_size = prompt_embeds.shape[0]` on what is otherwise a list), so we
+        # instead override `_get_t5_prompt_embeds` for the duration of the call:
+        # encode_prompt calls it for the positive prompt first, then the negative —
+        # so the 1st call returns edit_tokens, the 2nd encodes the real negative text.
+        prompt_text = edit_condition
+        orig_t5 = None
+        if not isinstance(edit_condition, str):
+            edit_tokens = edit_condition.to(device=device, dtype=weight_dtype)
+            prompt_text = ""  # ignored; positive embeds are overridden below
+            orig_t5 = pipeline._get_t5_prompt_embeds
+            _state = {"n": 0}
+
+            def _edit_t5(prompt, num_videos_per_prompt=1, max_sequence_length=512, device=None, dtype=None):
+                _state["n"] += 1
+                if _state["n"] == 1:  # positive prompt -> edit_tokens
+                    return [edit_tokens.to(device=device, dtype=dtype)]
+                return orig_t5(prompt, num_videos_per_prompt=num_videos_per_prompt,
+                               max_sequence_length=max_sequence_length, device=device, dtype=dtype)
+
+            pipeline._get_t5_prompt_embeds = _edit_t5
+
+        try:
+            with torch.no_grad():
+                sample = pipeline(
+                    prompt_text,
+                    num_frames=source_video.shape[2],
+                    negative_prompt=self.config.negative_prompt,
+                    height=sample_size[0],
+                    width=sample_size[1],
+                    generator=generator,
+                    guidance_scale=float(self.config.guidance_scale),
+                    num_inference_steps=int(self.config.num_inference_steps),
+                    video=source_video,
+                    mask_video=mask_video,
+                    control_video=None,
+                    subject_ref_images=None,
+                    boundary=backend["boundary"],
+                    shift=float(self.config.shift),
+                    vace_context_scale=float(self.config.vace_context_scale),
+                    callback_on_step_end=callback,
+                    callback_on_step_end_tensor_inputs=["latents"],
+                ).videos
+        finally:
+            if orig_t5 is not None:
+                pipeline._get_t5_prompt_embeds = orig_t5
 
         out_path = Path(out_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -301,27 +379,45 @@ class GatedRenderer:
         return tensor.float()
 
     @staticmethod
+    def _next_sigma(scheduler: Any, step_index: int) -> float:
+        """Sigma the working latents sit at after ``scheduler.step`` (step_index+1).
+
+        Both the diffusers Flow scheduler and the vendored fm_solvers schedulers
+        expose a ``sigmas`` tensor of length ``num_steps + 1`` ending at 0. Returning
+        a python float keeps the broadcast device/dtype-agnostic.
+        """
+        sigmas = getattr(scheduler, "sigmas", None)
+        if sigmas is None or len(sigmas) == 0:
+            return 0.0
+        idx = min(int(step_index) + 1, len(sigmas) - 1)
+        return float(sigmas[idx])
+
+    @staticmethod
     def _materialize_source_latents(*, pipeline: Any, source_video: Any, mask_video: Any,
-                                    height: int, width: int, weight_dtype: Any, device: Any):
+                                    height: int, width: int, weight_dtype: Any, device: Any,
+                                    feather_latent: bool = True):
         import torch
         import torch.nn.functional as F
         from einops import rearrange
 
-        source_video = source_video.to(dtype=weight_dtype)
         mask_video = mask_video.to(dtype=weight_dtype)
-        init_video = pipeline.image_processor.preprocess(
-            rearrange(source_video, "b c f h w -> (b f) c h w"), height=height, width=width
-        ).to(dtype=weight_dtype)
-        init_video = rearrange(init_video, "(b f) c h w -> b c f h w", f=source_video.shape[2]).to(device=device)
-
-        source_latents_list = pipeline.vace_encode_frames(init_video, ref_images=None, masks=None, vae=pipeline.vae)
-        source_latents = torch.stack(source_latents_list, dim=0).to(device=device, dtype=weight_dtype)
+        source_latents = encode_source_to_latent(
+            pipeline, source_video, height=height, width=width, weight_dtype=weight_dtype, device=device
+        )
 
         mask_condition = pipeline.mask_processor.preprocess(
             rearrange(mask_video, "b c f h w -> (b f) c h w"), height=height, width=width
         ).to(dtype=torch.float32)
         mask_condition = rearrange(mask_condition, "(b f) c h w -> b c f h w", f=mask_video.shape[2])
-        latent_mask = F.interpolate(mask_condition[:, :1], size=source_latents.shape[-3:], mode="nearest").to(
-            device=device, dtype=weight_dtype
-        )
+        # Spec 02:61-63 — feather the boundary: downsample the pixel mask to latent
+        # resolution with a soft (trilinear) kernel so the paste-back composite blends
+        # across the seam instead of a hard nearest-neighbour 0/1 step. The callback's
+        # (1-m)*src + m*latents already supports a soft m in [0,1].
+        if feather_latent:
+            latent_mask = F.interpolate(
+                mask_condition[:, :1], size=source_latents.shape[-3:], mode="trilinear", align_corners=False
+            ).clamp(0.0, 1.0)
+        else:
+            latent_mask = F.interpolate(mask_condition[:, :1], size=source_latents.shape[-3:], mode="nearest")
+        latent_mask = latent_mask.to(device=device, dtype=weight_dtype)
         return source_latents, latent_mask

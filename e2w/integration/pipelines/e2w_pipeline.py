@@ -66,6 +66,8 @@ def build_v0_pipeline(config_path: str | Path) -> "E2WPipeline":
         cfg_skip_ratio=gen.get("cfg_skip_ratio", 0),
         vace_context_scale=float(gen.get("vace_context_scale", 1.0)),
         paste_back_source_latent=bool(gen.get("paste_back_source_latent", True)),
+        paste_noise_to_timestep=bool(gen.get("paste_noise_to_timestep", True)),
+        mask_feather_latent=bool(gen.get("mask_feather_latent", True)),
         seed=int(gen.get("seed", 43)),
     )
     return E2WPipeline(
@@ -83,15 +85,15 @@ class E2WPipeline:
 
     def edit(self, video_path: str | Path, instruction: str, *, target_ref: str, operation: str,
              out_path: str | Path, vanilla: bool = False) -> Path:
-        if not vanilla:
-            raise NotImplementedError("V0 adapter supports vanilla=True only")
         source = self.abductor.invert(video_path)
-        mask, _plan = self.planner.plan(
+        mask, plan = self.planner.plan(
             video_path,
             instruction,
             target_ref=target_ref,
             operation=operation,
-            vanilla=True,
+            vanilla=vanilla,
         )
-        # Vanilla routing: [EDIT] is bypassed; VACE receives the native instruction string.
-        return self.renderer.render(source, instruction, mask, out_path=out_path)
+        # Vanilla: [EDIT] bypassed, VACE receives the native instruction string.
+        # Full A.1: VACE receives the planner's edit_tokens as the content condition.
+        edit_condition = instruction if vanilla else plan.edit_tokens
+        return self.renderer.render(source, edit_condition, mask, out_path=out_path)

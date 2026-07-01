@@ -36,6 +36,26 @@ class WanAbductor(Abductor):
         meta = self._probe(video)
         return SourceLatent(latent=WanSourcePayload(video_path=str(video), **meta))
 
+    def encode_only(self, source_video: Any, *, pipeline: Any, sample_size: tuple[int, int],
+                    weight_dtype: Any, device: Any) -> Any:
+        """Encode a loaded source-video tensor to the Wan latent — the G1 hook.
+
+        Architecture A.2【1】: the source latent is the engineered exogenous U. V0
+        materializes it lazily in the renderer to avoid a double VAE load; this
+        exposes the *same* encode (``renderer.encode_source_to_latent``) so the G1
+        round-trip ``decode(invert(V)) ≈ V`` (02:91) is testable in isolation once a
+        pipeline/VAE is loaded. ``source_video`` is a ``(b,c,f,h,w)`` tensor, e.g.
+        from the renderer backend's ``get_video_to_video_latent``. Lazy import keeps
+        the abduction↔renderer module pair free of an import cycle.
+        """
+        from .renderer import encode_source_to_latent
+
+        return encode_source_to_latent(
+            pipeline, source_video,
+            height=sample_size[0], width=sample_size[1],
+            weight_dtype=weight_dtype, device=device,
+        )
+
     @staticmethod
     def _probe(video: str | Path) -> dict[str, Any]:
         import cv2

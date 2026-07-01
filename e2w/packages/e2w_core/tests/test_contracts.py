@@ -5,8 +5,8 @@ import unittest
 from pathlib import Path
 
 from e2w_core import io_contract
-from e2w_core.masks import PIXEL_PRIORITY, MaskLayer, resolve_pixel
-from e2w_core.plan import Operation
+from e2w_core.masks import PIXEL_PRIORITY, MaskLayer, ThreeLayerMask, resolve_pixel
+from e2w_core.plan import EDIT_TOKEN_DIM, EditPlan, Intervention, Operation, validate_edit_tokens_shape
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -50,6 +50,72 @@ class MaskContractTest(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             resolve_pixel([])
+
+
+class SeamPayloadContractTest(unittest.TestCase):
+    """The seam must carry the Phase-2 planner payloads, not just the vanilla stubs.
+
+    `region_query` / `edit_tokens` are typed `Any` (tensor at runtime), so this is a
+    structural contract check — it pins that the dataclasses transport the fields the
+    full A.1 planner emits, and that the vanilla `None` bypass stays valid.
+    """
+
+    def test_editplan_carries_region_query_and_edit_tokens(self):
+        # Stand-in objects for the runtime tensors — identity must survive the seam.
+        region_query = ("region_query", (4, 256))
+        edit_tokens = ("edit_tokens", (4, 4096))
+        plan = EditPlan(
+            intervention=Intervention(
+                operation=Operation.ADD, target_ref="red ball", instruction="Add a red ball."
+            ),
+            region_query=region_query,
+            edit_tokens=edit_tokens,
+        )
+        self.assertIs(plan.region_query, region_query)
+        self.assertIs(plan.edit_tokens, edit_tokens)
+        self.assertEqual(plan.intervention.operation, Operation.ADD)
+
+    def test_editplan_vanilla_bypass_keeps_none(self):
+        plan = EditPlan(
+            intervention=Intervention(
+                operation=Operation.REMOVE, target_ref="ball", instruction="Remove the ball."
+            ),
+            region_query=None,
+            edit_tokens=None,
+        )
+        self.assertIsNone(plan.region_query)
+        self.assertIsNone(plan.edit_tokens)
+
+    def test_threelayermask_carries_direct_and_indirect(self):
+        direct = ("direct", (21, 480, 832))
+        indirect = ("indirect", (21, 480, 832))
+        mask = ThreeLayerMask(direct=direct, indirect=indirect)
+        self.assertIs(mask.direct, direct)
+        self.assertIs(mask.indirect, indirect)
+        # unchanged() is a contract stub implemented in the generation half, not core.
+        with self.assertRaises(NotImplementedError):
+            mask.unchanged()
+
+
+class EditTokenValidationTest(unittest.TestCase):
+    """Guards the full-path failure mode: edit_tokens missing/malformed must raise,
+    never silently fall back to text conditioning (the adapter + render worker both
+    call this before reaching VACE)."""
+
+    def test_valid_shape_passes(self):
+        self.assertEqual(validate_edit_tokens_shape((4, EDIT_TOKEN_DIM), slots=4), (4, 4096))
+
+    def test_wrong_slots_raises(self):
+        with self.assertRaises(ValueError):
+            validate_edit_tokens_shape((3, EDIT_TOKEN_DIM), slots=4)
+
+    def test_wrong_dim_raises(self):
+        with self.assertRaises(ValueError):
+            validate_edit_tokens_shape((4, 2048), slots=4)
+
+    def test_wrong_rank_raises(self):
+        with self.assertRaises(ValueError):
+            validate_edit_tokens_shape((4,), slots=4)
 
 
 class OperationParityTest(unittest.TestCase):

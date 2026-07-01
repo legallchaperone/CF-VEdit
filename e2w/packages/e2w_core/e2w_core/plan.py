@@ -37,6 +37,23 @@ class Operation(Enum):
     FORCE_EVENT = "force_event"
 
 
+EDIT_TOKEN_DIM = 4096
+
+
+def validate_edit_tokens_shape(shape: Any, *, slots: int, dim: int = EDIT_TOKEN_DIM) -> tuple[int, int]:
+    """Assert an ``edit_tokens`` array has shape ``(slots, dim)``; return it.
+
+    Pure / dependency-free so the full-path failure mode ("edit_tokens missing or
+    malformed must NOT silently fall back to text conditioning") is unit-testable
+    without numpy/torch. Raises ``ValueError`` on mismatch.
+    """
+    got = tuple(int(x) for x in shape)
+    want = (int(slots), int(dim))
+    if got != want:
+        raise ValueError(f"edit_tokens must have shape {want}, got {got}")
+    return want
+
+
 @dataclass(frozen=True)
 class Intervention:
     """Parsed ``do(X=x)`` — the Action step of abduction→action→prediction."""

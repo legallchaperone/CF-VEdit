@@ -66,13 +66,28 @@ def manifest_sha256(manifest: Path) -> str:
 def render_worker(job_path: Path) -> int:
     import numpy as np
     from e2w_core.masks import ThreeLayerMask
+    from e2w_core.plan import validate_edit_tokens_shape
 
     job = json.loads(job_path.read_text())
     pipeline = build_v0_pipeline(job["config"])
     arrays = np.load(job["mask_npz"], allow_pickle=False)
     mask = ThreeLayerMask(direct=arrays["direct"].astype(bool), indirect=arrays["indirect"].astype(bool))
     source = pipeline.abductor.invert(job["source_path"])
-    pipeline.renderer.render(source, job["instruction"], mask, out_path=job["out_path"])
+    # Full A.1 MUST condition on edit_tokens — never silently fall back to the
+    # instruction string, or a broken planner would still render `status: ok` while
+    # bypassing the [EDIT] -> edit_tokens -> renderer path. Vanilla carries no
+    # edit_tokens and intentionally uses the native instruction text.
+    if not job.get("vanilla", True):
+        if "edit_tokens" not in arrays.files:
+            raise RuntimeError("full mode requires edit_tokens in the mask npz, but none were saved")
+        edit = arrays["edit_tokens"]
+        validate_edit_tokens_shape(edit.shape, slots=int(job["edit_slots"]))
+        import torch
+
+        edit_condition = torch.from_numpy(edit)
+    else:
+        edit_condition = job["instruction"]
+    pipeline.renderer.render(source, edit_condition, mask, out_path=job["out_path"])
     return 0
 
 
@@ -85,15 +100,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sample-limit", type=int, help="Run only the first N manifest rows")
     parser.add_argument("--overwrite", action="store_true", help="Remove an existing predictions/<run-name> before writing")
     parser.add_argument("--continue-on-error", action="store_true", help="Write failed rows instead of aborting on first sample error")
-    parser.add_argument("--vanilla", action="store_true", help="Required guard: run the V0 vanilla path")
+    parser.add_argument("--vanilla", action="store_true", help="Run the V0 vanilla bypass path")
+    parser.add_argument("--full", action="store_true",
+                        help="Run the full (untrained) A.1 architecture: teacher-forced three-layer mask + edit_tokens")
     parser.add_argument("--render-worker-json", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
     if args.render_worker_json:
         return render_worker(Path(args.render_worker_json).resolve())
 
-    if not args.vanilla:
-        parser.error("V0 adapter requires --vanilla to make the bypass explicit")
+    if args.vanilla == args.full:
+        parser.error("pass exactly one of --vanilla (bypass) or --full (untrained A.1)")
+    vanilla = args.vanilla
 
     benchmark_root = Path(args.benchmark_root).resolve()
     manifest_path = benchmark_root / "manifest.jsonl"
@@ -125,8 +143,14 @@ def main(argv: list[str] | None = None) -> int:
             "run_name": args.run_name,
             "benchmark_version": BENCHMARK_VERSION,
             "manifest_sha256": manifest_sha256(manifest_path),
-            "model_name": "E2W V0 vanilla: Sa2VA [SEG] + Wan2.2 VACE-Fun with latent paste-back",
-            "model_version": "v0-vanilla-eval",
+            "model_name": (
+                "E2W V0 vanilla: Sa2VA [SEG] + Wan2.2 VACE-Fun with latent paste-back"
+                if vanilla else
+                "E2W V0 full (untrained A.1): teacher-forced [SEG_DIR]/[SEG_IND]/[EDIT] "
+                "three-layer mask + edit_tokens -> Wan2.2 VACE-Fun, noised feathered paste-back"
+            ),
+            "model_version": "v0-vanilla-eval" if vanilla else "v0-full-untrained-eval",
+            "mode": "vanilla" if vanilla else "full-untrained",
             "created_at": utc_now(),
             "num_samples": len(manifest_rows),
             "command": " ".join(sys.argv),
@@ -137,9 +161,11 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     pipeline = build_v0_pipeline(args.config)
+    slots = int(pipeline.planner.config.edit_token_slots)
     prediction_rows: list[dict[str, Any]] = []
     planned: dict[str, tuple[dict[str, Any], str, str]] = {}
     failures: dict[str, PredictionRow] = {}
+    position_ids_modes: dict[str, Any] = {}
 
     # Stage 1: Sa2VA localization only. Keep Wan/VACE unloaded, then release Sa2VA
     # before the 14B renderer enters GPU memory.
@@ -154,15 +180,33 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[e2w-adapter] localize {sample_id}: {instruction}", flush=True)
             import numpy as np
 
-            mask, _plan = pipeline.planner.plan(
+            from e2w_core.plan import validate_edit_tokens_shape
+
+            mask, plan = pipeline.planner.plan(
                 source_path,
                 instruction,
                 target_ref=target_ref,
                 operation=operation,
-                vanilla=True,
+                vanilla=vanilla,
             )
             mask_path = masks_dir / f"{sample_id}.npz"
-            np.savez_compressed(mask_path, direct=mask.direct.astype(bool), indirect=mask.indirect.astype(bool))
+            save_kwargs = dict(direct=mask.direct.astype(bool), indirect=mask.indirect.astype(bool))
+            if not vanilla:
+                # Fail loudly: a full run with no edit_tokens is a broken planner, not
+                # a renderable sample. Validate shape before it reaches VACE.
+                if plan.edit_tokens is None:
+                    raise RuntimeError(f"full mode planner returned no edit_tokens for {sample_id}")
+                edit_np = plan.edit_tokens.float().cpu().numpy()
+                validate_edit_tokens_shape(edit_np.shape, slots=slots)
+                save_kwargs["edit_tokens"] = edit_np
+                if plan.region_query is not None:
+                    save_kwargs["region_query"] = plan.region_query.float().cpu().numpy()
+                mode = getattr(pipeline.planner, "last_position_ids_mode", None)
+                position_ids_modes[sample_id] = mode
+                if mode and mode != "get_rope_index+extend":
+                    print(f"[e2w-adapter] WARNING {sample_id}: position_ids fell back to {mode!r} "
+                          f"(M-RoPE path not used)", flush=True)
+            np.savez_compressed(mask_path, **save_kwargs)
             planned[sample_id] = (row, str(source_path), str(mask_path))
         except Exception as exc:  # noqa: BLE001 - persisted for benchmark failure accounting.
             err = f"localization {type(exc).__name__}: {exc}"
@@ -174,6 +218,15 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
 
     pipeline.planner.unload()
+
+    # Record which position-id path each sample actually used, so a silent M-RoPE
+    # fallback (arange) is visible in the run artifact and never mistaken for the
+    # validated get_rope_index path (ADR-0004).
+    if not vanilla and position_ids_modes:
+        meta_path = run_dir / RUN_META
+        meta = json.loads(meta_path.read_text())
+        meta["position_ids_modes"] = position_ids_modes
+        write_json(meta_path, meta)
 
     # Stage 2: Wan/VACE rendering. Sa2VA is no longer resident.
     for row in manifest_rows:
@@ -199,6 +252,8 @@ def main(argv: list[str] | None = None) -> int:
                     "mask_npz": mask_path_str,
                     "instruction": instruction,
                     "out_path": str(out_path),
+                    "vanilla": vanilla,
+                    "edit_slots": slots,
                 },
             )
             env = os.environ.copy()
