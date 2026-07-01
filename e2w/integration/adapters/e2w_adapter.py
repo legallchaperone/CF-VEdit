@@ -102,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--continue-on-error", action="store_true", help="Write failed rows instead of aborting on first sample error")
     parser.add_argument("--vanilla", action="store_true", help="Run the V0 vanilla bypass path")
     parser.add_argument("--full", action="store_true",
-                        help="Run the full (untrained) A.1 architecture: teacher-forced three-layer mask + edit_tokens")
+                        help="Run the full (untrained) A.1 architecture: query-token three-layer mask + edit_tokens")
     parser.add_argument("--render-worker-json", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
@@ -146,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
             "model_name": (
                 "E2W V0 vanilla: Sa2VA [SEG] + Wan2.2 VACE-Fun with latent paste-back"
                 if vanilla else
-                "E2W V0 full (untrained A.1): teacher-forced [SEG_DIR]/[SEG_IND]/[EDIT] "
+                "E2W V0 full (untrained A.1): query-token [SEG_DIR]/[SEG_IND]/[EDIT] "
                 "three-layer mask + edit_tokens -> Wan2.2 VACE-Fun, noised feathered paste-back"
             ),
             "model_version": "v0-vanilla-eval" if vanilla else "v0-full-untrained-eval",

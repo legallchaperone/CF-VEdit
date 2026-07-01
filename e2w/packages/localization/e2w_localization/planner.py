@@ -30,7 +30,7 @@ class PlannerConfig:
     edit_token_slots: int = 4
     renderer_condition_dim: int = 4096
     segmentation_prompt_template: str = "<image>Please segment {target_ref}. [SEG]"
-    # Non-vanilla (full A.1) teacher-forced path: how many frames enter the MLLM
+    # Non-vanilla (full A.1) query-token path: how many frames enter the MLLM
     # context. SAM2 still propagates the mask across all loaded frames.
     max_content_frames: int = 5
     e2w_head_seed: int = 0
@@ -74,10 +74,10 @@ class CausalPlanner:
             )
             return ThreeLayerMask(direct=direct, indirect=indirect), plan
 
-        # Full A.1 (untrained): teacher-forced [SEG_DIR]/[SEG_IND]/[EDIT] path. Emits a
+        # Full A.1 (untrained): query-token [SEG_DIR]/[SEG_IND]/[EDIT] path. Emits a
         # real three-layer mask (indirect no longer zeros) + region_query + edit_tokens.
         from .overlay import attach_e2w_heads
-        from .teacher_forced import localize_three_layer
+        from .query_tokens import localize_three_layer
 
         model, processor = self._load_model()
         attach_e2w_heads(

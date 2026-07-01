@@ -1,17 +1,39 @@
-"""Teacher-forced localization forward — the real (untrained) A.1 planner path.
+"""Query-token localization forward — the real (untrained) A.1 planner path.
 
 An untrained model never *emits* ``[SEG_DIR]/[SEG_IND]/[EDIT]`` autoregressively and
 ``predict_forward`` only reads hidden for *generated* tokens, so the trained-path
-mechanism cannot be reached via ``generate()``. Instead we teacher-force: append the
-held-Parameter token embeddings (from ``overlay.attach_e2w_heads``) to the prompt's
-``inputs_embeds`` and run a plain forward with ``output_hidden_states=True``. The
-recovered hidden at the appended positions drive:
+mechanism cannot be reached via ``generate()``. Instead we inject fixed query
+tokens: append the held-Parameter token embeddings (from
+``overlay.attach_e2w_heads``) to the prompt's ``inputs_embeds`` and run a plain
+forward with ``output_hidden_states=True``. The recovered hidden at the appended
+positions drive:
 
 - ``text_hidden_fcs`` -> SAM2 (dual pass) -> DIRECT and INDIRECT masks
 - ``edit_hidden_fcs`` -> ``edit_tokens`` (Nt, 4096) for the renderer
 
 Untrained -> the masks/tokens are shape-correct garbage by design (V0). The
-mechanism was validated on the real checkpoint by ``spike_teacher_forced.py``.
+mechanism was validated on the real checkpoint by ``spike_query_tokens.py``.
+
+This is NOT teacher forcing (ADR-0004 amendment): there is no loss and no ground
+truth being substituted for the model's own output here, only an unconditional
+append. "Query tokens" borrows the DETR/Q-Former *concept* (a learnable, non-vocab
+slot used to read out information) but not their mechanism — these 6 slots are
+concatenated into the LM's own self-attention sequence and share its QKV
+projections, not routed through an independent cross-attention decoder.
+
+Attention/position design among the 6 appended positions (ADR-0006): default
+causal masking + concatenation order would leave ``[EDIT]`` slots able to see
+``[SEG_DIR]``/``[SEG_IND]`` (an order artifact) while only seeing *earlier*
+``[EDIT]`` slots, not later ones — a mismatch with ``edit_tokens``' role as a
+stand-in for a (bidirectional) T5 encoder's output (ADR-0005). ``[EDIT]`` slots
+are therefore made mutually bidirectional and isolated from ``[SEG_DIR]``/
+``[SEG_IND]`` via a custom 4D attention mask (:func:`_build_query_attention_mask`),
+and tied to a single shared position id so their pairwise RoPE relative offset is
+exactly 0 (:func:`_continuation_offsets`) — masking connectivity alone does not
+remove the RoPE positional bias between two mutually-visible positions.
+``[SEG_DIR]``/``[SEG_IND]`` mutual visibility is left unchanged (still causal):
+there is no analogous "what does this impersonate" argument to resolve it either
+way (open question, ADR-0006).
 
 Boundary: emits only e2w_core-compatible payloads; never imports generation.
 """
@@ -68,8 +90,57 @@ def _merged_inputs_embeds(qwen: Any, mm_inputs: Any):
     return inputs_embeds
 
 
-def _position_ids(qwen: Any, mm_inputs: Any, total_len: int):
-    """M-RoPE positions extended by +1 continuation per appended token.
+def _continuation_offsets(num_edit_slots: int) -> list[int]:
+    """Position-id offsets for the appended block, relative to the prompt's last
+    position (ADR-0006): ``[SEG_DIR]``=+1, ``[SEG_IND]``=+2, all ``[EDIT]`` slots
+    tied at +3 so their pairwise RoPE relative offset is exactly 0 (order-free,
+    matching :func:`_build_query_attention_mask`'s bidirectional-among-``[EDIT]``
+    connectivity — a mask alone does not remove the RoPE positional bias between
+    two positions that can see each other)."""
+    return [1, 2] + [3] * int(num_edit_slots)
+
+
+def _build_query_attention_mask(*, n_prompt: int, num_edit_slots: int, prompt_padding_mask: Any,
+                                dtype: Any, device: Any):
+    """Additive 4D attention mask (ADR-0006): causal over prompt/video as before;
+    ``[EDIT]`` slots bidirectional among themselves; ``[EDIT]`` <-> ``[SEG_DIR]``/
+    ``[SEG_IND]`` blocked both directions; ``[SEG_DIR]``/``[SEG_IND]`` mutual
+    visibility unchanged (still causal, left as an open question in ADR-0006).
+
+    ``batch_size=1`` only — the planner probes one clip per call.
+    """
+    import torch
+
+    assert prompt_padding_mask is None or prompt_padding_mask.shape[0] == 1, (
+        f"batch_size=1 only, got {prompt_padding_mask.shape[0]}"
+    )
+    n_new = 2 + int(num_edit_slots)
+    total_len = n_prompt + n_new
+    seg_idx = torch.arange(n_prompt, n_prompt + 2, device=device)
+    edit_idx = torch.arange(n_prompt + 2, total_len, device=device)
+
+    row = torch.arange(total_len, device=device).view(-1, 1)
+    col = torch.arange(total_len, device=device).view(1, -1)
+    causal_ok = col <= row
+    valid_col = torch.ones(total_len, dtype=torch.bool, device=device)
+    if prompt_padding_mask is not None:
+        valid_col[:n_prompt] = prompt_padding_mask[0].bool()
+    allowed = causal_ok & valid_col.view(1, -1)
+
+    min_val = torch.finfo(dtype).min
+    mask = torch.full((total_len, total_len), min_val, dtype=dtype, device=device)
+    mask[allowed] = 0.0
+    # [EDIT] cannot see [SEG_DIR]/[SEG_IND] (was allowed under plain causal — order artifact).
+    mask[edit_idx[:, None], seg_idx] = min_val
+    # [EDIT] <-> [EDIT] fully bidirectional (was one-directional under plain causal).
+    mask[edit_idx[:, None], edit_idx] = 0.0
+    return mask.view(1, 1, total_len, total_len)
+
+
+def _position_ids(qwen: Any, mm_inputs: Any, total_len: int, *, num_edit_slots: int):
+    """M-RoPE positions; the appended block uses :func:`_continuation_offsets`
+    (ADR-0006) instead of a plain arange continuation, so all ``[EDIT]`` slots
+    share one position id.
 
     Returns ``(position_ids, mode)``. ``mode`` is ``"get_rope_index+extend"`` on the
     real M-RoPE path or ``"arange-fallback"`` if get_rope_index raised — the fallback
@@ -81,18 +152,25 @@ def _position_ids(qwen: Any, mm_inputs: Any, total_len: int):
     import torch
 
     input_ids = mm_inputs["input_ids"]
-    n_extra = total_len - input_ids.shape[1]
+    orig_len = input_ids.shape[1]
+    n_extra = total_len - orig_len
+    offsets = _continuation_offsets(num_edit_slots)
+    assert len(offsets) == n_extra, f"offsets length {len(offsets)} != n_extra {n_extra}"
     rope_fn = getattr(qwen, "get_rope_index", None) or getattr(qwen.model, "get_rope_index", None)
     try:
         position_ids, _ = rope_fn(input_ids, mm_inputs.get("image_grid_thw"),
                                   attention_mask=mm_inputs.get("attention_mask"))
         last = position_ids[:, :, -1:]
-        cont = last + torch.arange(1, n_extra + 1, device=position_ids.device).view(1, 1, -1)
+        offsets_t = torch.tensor(offsets, device=position_ids.device).view(1, 1, -1)
+        cont = last + offsets_t
         return torch.cat([position_ids, cont], dim=-1), "get_rope_index+extend"
     except Exception as exc:  # noqa: BLE001 - keep the run alive, but make the degradation loud
         warnings.warn(f"M-RoPE get_rope_index failed ({type(exc).__name__}: {exc}); "
                       f"falling back to arange position_ids — NOT the validated path")
-        pos = torch.arange(total_len, device=input_ids.device).view(1, 1, -1).expand(3, 1, -1).contiguous()
+        base = torch.arange(orig_len, device=input_ids.device)
+        offsets_t = torch.tensor(offsets, device=input_ids.device)
+        cont = (orig_len - 1) + offsets_t
+        pos = torch.cat([base, cont]).view(1, 1, -1).expand(3, 1, -1).contiguous()
         return pos, "arange-fallback"
 
 
@@ -110,7 +188,7 @@ def _sam2_mask(model: Any, query: Any, g_pixel_values: Any, ori_image_size, num_
 
 def localize_three_layer(model: Any, processor: Any, video_frames: list, instruction: str, *,
                          num_edit_slots: int = 4, max_content_frames: int = 5) -> dict:
-    """Teacher-forced three-layer localization. Returns direct/indirect masks + planner vectors.
+    """Query-token three-layer localization. Returns direct/indirect masks + planner vectors.
 
     ``model`` must already have E2W heads attached (overlay.attach_e2w_heads).
     """
@@ -130,17 +208,21 @@ def localize_three_layer(model: Any, processor: Any, video_frames: list, instruc
             model.seg_ind_embed.view(1, 1, -1),
             model.edit_embeds.view(1, int(num_edit_slots), -1),
         ], dim=1).to(dtype=next(model.parameters()).dtype)
-        n_new = 2 + int(num_edit_slots)
 
         inputs_embeds = _merged_inputs_embeds(qwen, mm_inputs)
+        n_prompt = inputs_embeds.shape[1]
         inputs_embeds = torch.cat([inputs_embeds, new_tokens], dim=1)
         total_len = inputs_embeds.shape[1]
-        attn = mm_inputs.get("attention_mask")
-        if attn is not None:
-            attn = torch.cat([attn, torch.ones(attn.shape[0], n_new, device=attn.device, dtype=attn.dtype)], dim=1)
-        position_ids, position_ids_mode = _position_ids(qwen, mm_inputs, total_len)
+        n_new = total_len - n_prompt
+        attn_mask_4d = _build_query_attention_mask(
+            n_prompt=n_prompt, num_edit_slots=int(num_edit_slots),
+            prompt_padding_mask=mm_inputs.get("attention_mask"),
+            dtype=inputs_embeds.dtype, device=inputs_embeds.device,
+        )
+        position_ids, position_ids_mode = _position_ids(
+            qwen, mm_inputs, total_len, num_edit_slots=int(num_edit_slots))
 
-        out = qwen.model(inputs_embeds=inputs_embeds, attention_mask=attn,
+        out = qwen.model(inputs_embeds=inputs_embeds, attention_mask=attn_mask_4d,
                          position_ids=position_ids, output_hidden_states=True, use_cache=False)
         appended = out.hidden_states[-1][:, -n_new:, :]  # (1, n_new, hidden)
 

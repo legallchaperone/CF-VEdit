@@ -1,4 +1,4 @@
-"""Phase-0 keystone spike — does the teacher-forced new-token forward RUN?
+"""Phase-0 keystone spike — does the query-token forward RUN?
 
 Run THIS on the GPU box before building any of Phase 2. It answers the one
 question the whole localization-half design rests on and that cannot be checked
@@ -9,7 +9,7 @@ without the real Sa2VA checkpoint + transformers:
     (output_hidden_states=True, no generate()), recover hidden at the appended
     positions, and drive SAM2 to a (T,H,W) mask?
 
-If yes → the overlay/teacher_forced design is sound; build Phase 2.
+If yes → the overlay/query_tokens design is sound; build Phase 2.
 If the forward raises a shape / M-RoPE position error → that is the landmine; the
 fallback below (arange position continuation) is the first thing to try, and the
 exact `get_rope_index` / vision-merge incantation gets pinned here, once, cheaply
@@ -18,9 +18,16 @@ exact `get_rope_index` / vision-merge incantation gets pinned here, once, cheapl
 This script mutates nothing on disk and never touches the vocab, so the vanilla
 `[SEG]` path stays byte-identical regardless of outcome.
 
+Note: this spike predates the ADR-0006 attention/position-id fix in
+`query_tokens.py` — it builds its own simple, unmodified causal attention (no
+grouped mask, no tied [EDIT] position ids), because its only job is "does the
+forward run at all", which it already answered. It is not re-run by anything
+else in the codebase; treat it as a historical validation artifact, not the
+maintained mechanism.
+
 Usage (GPU box):
     cd e2w
-    python -m e2w_localization.spike_teacher_forced \
+    python -m e2w_localization.spike_query_tokens \
         --weights-config configs/weights.v0.json
 """
 from __future__ import annotations
@@ -116,7 +123,7 @@ def _position_ids(qwen, mm_inputs, total_len):
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="Phase-0 teacher-forced keystone spike")
+    parser = argparse.ArgumentParser(description="Phase-0 query-token keystone spike")
     parser.add_argument("--weights-config", default="configs/weights.v0.json")
     parser.add_argument("--num-edit-slots", type=int, default=4)
     parser.add_argument("--text", default="Please segment the object.")
@@ -149,7 +156,7 @@ def main(argv=None) -> int:
     position_ids, pos_mode = _position_ids(qwen, mm_inputs, total_len)
     print(f"      position_ids via {pos_mode}; inputs_embeds {tuple(inputs_embeds.shape)}")
 
-    print("[4/5] teacher-forced forward (no generate) ...")
+    print("[4/5] query-token forward (no generate) ...")
     with torch.no_grad():
         out = qwen.model(  # inner Qwen2_5_VLModel decoder
             inputs_embeds=inputs_embeds, attention_mask=attn,
@@ -173,9 +180,9 @@ def main(argv=None) -> int:
     masks = model.grounding_encoder.language_embd_inference(sam_states, [query] * 1)
     print(f"      OK: SAM2 returned masks {tuple(masks.shape)} from injected hidden")
 
-    print("\nKEYSTONE PASSED — teacher-forced new-token forward runs and reaches SAM2.")
+    print("\nKEYSTONE PASSED — query-token forward runs and reaches SAM2.")
     print(f"  edit_hidden shape (pre-projection) {tuple(edit_hidden.shape)} -> edit_hidden_fcs -> (Nt,4096)")
-    print("  Safe to build Phase 2 (overlay.py / teacher_forced.py).")
+    print("  Safe to build Phase 2 (overlay.py / query_tokens.py).")
     return 0
 
 

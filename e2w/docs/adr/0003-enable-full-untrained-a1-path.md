@@ -21,7 +21,7 @@ sequencing, taken to make the *structure* exist and run before training.
 
 1. Add a `--full` mode to `e2w_adapter` and a `vanilla=False` branch to
    `CausalPlanner.plan` that runs the complete A.1 data path with untrained heads:
-   teacher-forced three-layer mask + `region_query` + `edit_tokens` → renderer.
+   query-token three-layer mask + `region_query` + `edit_tokens` → renderer.
 2. **Vanilla stays the default floor and byte-identical** (its branch is untouched;
    the `[SEG]` `generate()` path is not perturbed — see ADR-0004).
 3. **Quality is explicitly out of scope.** Only structural completeness + clean
