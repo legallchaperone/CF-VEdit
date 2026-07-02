@@ -13,7 +13,7 @@
     "segmentation_prompt_template": "<image>Please segment {target_ref}. [SEG]"
   },
   "generation": {
-    "_note": "CogVideoX-Fun/VOID pass1 renderer (ADR-0007). Render params fixed in VoidRendererConfig to reproduce pass1; only these two are overridable here. WARNING: gpu_memory_mode=model_cpu_offload_and_qfloat8 (float8) SILENTLY BREAKS GRADIENT — inference only. Stage 2 training MUST switch to model_full_load (spec §2 Stage 2 + §5.8).",
+    "_note": "CogVideoX-Fun/VOID pass1 renderer (ADR-0007). Render params fixed in VoidRendererConfig to reproduce pass1; only these two are overridable here. WARNING: gpu_memory_mode=model_cpu_offload_and_qfloat8 (float8) SILENTLY BREAKS GRADIENT — inference only. Stage 2 training MUST switch to model_full_load (spec §2 Stage 2 + §5.10).",
     "gpu_memory_mode": "model_cpu_offload_and_qfloat8",
     "seed": 42
   }
