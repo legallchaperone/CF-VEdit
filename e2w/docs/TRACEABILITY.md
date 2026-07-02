@@ -24,8 +24,8 @@ Replaces the abduction/Pearl-framed novelties below. See spec §0.
 | claim | module | guarding test | status |
 |---|---|---|---|
 | (a) physics-consequence-aware removal task (vs. photometric-only concurrent work) | benchmark `operation=remove` subset + contract `affected_regions`/`counterfactual_state` | CF-VEdit remove subset IP×CR vs VOID (`results/void/`) | ⬜ not started |
-| (b) controlled comparison: renderer + mask mechanism identical to VOID, only conditioning source varies | `integration/adapters/e2w_adapter.py` (v0 rework pending) using frozen CogVideoX-Fun + `void_pass1.safetensors` | VOID-oracle-quadmask+edit-token ablation cell (spec §3) isolates the one variable | ⬜ renderer not yet ported off VACE/Wan in code |
-| (c) seg/edit dual-branch, asymmetric differentiability made precise (edit branch end-to-end differentiable through frozen renderer; seg branch is not — quadmask thresholding blocks gradient) | `localization/e2w_localization/{overlay,query_tokens}.py` (6 fixed-position query tokens: `seg_dir,seg_ind,edit_0..3`; custom 4D attention mask; tied RoPE) | Stage 0: held-out mask IoU/Dice. Stage 2: edit-token cosine-collapse check (spec §2 Stage 1 note) | ◑ query-token mechanism exists (ADR-0004/0006) targeting old renderer; Stage 0–2 training not started |
+| (b) controlled comparison: renderer + mask mechanism identical to VOID, only conditioning source varies | `generation/e2w_generation/void_renderer.py` (frozen CogVideoX-Fun + `void_pass1.safetensors`, thin VOID-pipeline wrapper) + `integration/{pipelines,adapters}` | VOID-oracle-quadmask+edit-token ablation cell (spec §3) isolates the one variable | ◑ renderer ported (M0–M4): vendored VOID fork + `void_renderer.py`; M2 fidelity pixel-MAE ~1.5 vs VOID pass1; M4 e2e pass (Sa2VA→mask→render, 832×480/21f). A/B eval pending training |
+| (c) seg/edit dual-branch, asymmetric differentiability made precise (edit branch end-to-end differentiable through frozen renderer; seg branch is not — quadmask thresholding blocks gradient) | `localization/e2w_localization/{overlay,query_tokens}.py` (6 fixed-position query tokens: `seg_dir,seg_ind,edit_0..3`; custom 4D attention mask; tied RoPE) | Stage 0: held-out mask IoU/Dice. Stage 2: edit-token cosine-collapse check (spec §2 Stage 1 note) | ◑ query-token mechanism exists (ADR-0004/0006); grad-through-frozen-renderer verified (edit_embeds.grad nonzero via `prompt_embeds`, bf16); Stage 0–2 training not started |
 
 ## Superseded novelties (pre-ADR-0007, kept for history)
 
@@ -63,12 +63,18 @@ Replaces the abduction/Pearl-framed novelties below. See spec §0.
 
 ## Pipeline & training
 
-> **The rows below target the pre-ADR-0007 VACE/Wan renderer.** They describe
-> real, working code (`e2w_generation/renderer.py` et al.) that has not yet
-> been reworked for the v0 frozen-CogVideoX-Fun/`void_pass1` target — see
-> ADR-0007 Consequences. Read them as "what's built on the old target," not as
-> v0 progress; v0's own Stage -1/0/1/2 plan (spec §2) has no rows here yet
-> because no code exists against it.
+> **Renderer reworked to frozen CogVideoX-Fun/`void_pass1` (M0–M4, ADR-0007).**
+> The v0 renderer is now `e2w_generation/void_renderer.py` — a thin wrapper over
+> the vendored VOID fork (`third_party/void_videox_fun/`): edit_tokens →
+> `prompt_embeds` hard-replace, mask → VOID channel-concat, paste-back/abduction
+> dropped. Verified: M2 pixel-MAE ~1.5 vs VOID pass1, M4 end-to-end pass,
+> gradient flows through the frozen renderer to edit_embeds. Deps: Sa2VA remote
+> code needs `qwen_vl_utils`. Known gap: `E2WPipeline.edit()` keeps both models
+> resident (no `planner.unload()`); fine on 97GB, adapter's two-phase path
+> handles small GPUs. The rows below describe the **superseded** VACE/Wan
+> implementation (`e2w_generation/renderer.py`), kept for history (🔁 ADR-0007).
+> v0's Stage 0/1/2 training has no code rows yet; Stage -1 pre-experiment done
+> (spec §2 result).
 
 | claim | module | guarding test | status |
 |---|---|---|---|
