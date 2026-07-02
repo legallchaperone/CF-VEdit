@@ -102,7 +102,7 @@ class CausalPlanner:
         return ThreeLayerMask(direct=out["direct"], indirect=out["indirect"]), plan
 
     def unload(self) -> None:
-        """Release Sa2VA weights before generation loads Wan/VACE."""
+        """Release Sa2VA weights before generation loads the CogVideoX-Fun renderer."""
         import gc
         self._model = None
         self._processor = None
@@ -161,8 +161,10 @@ class CausalPlanner:
         """Initialize [SEG_DIR]/[SEG_IND]/[EDIT] scaffolding without routing to it.
 
         This mirrors Sa2VA's [SEG] token registration pattern but keeps V0 output
-        on the pretrained [SEG] path. The edit projection width is the verified
-        Wan/VACE text-condition width from the Wan2.2 config (4096 by default).
+        on the pretrained [SEG] path. The edit projection width matches the v0
+        renderer's text-condition width — CogVideoX-Fun-InP's own T5 (d_model=4096;
+        ADR-0007 renderer swap. The old Wan/UMT5 value was also 4096 — numeric
+        coincidence, target space is now CogVideoX T5).
         """
         if self._heads_initialized:
             return
@@ -172,8 +174,10 @@ class CausalPlanner:
         tokenizer = processor.tokenizer
         # V0 must preserve the stock [SEG] path exactly. Registering new tokens and
         # resizing embeddings perturbs generation on this Sa2VA checkpoint under
-        # transformers>=4.51, so the bypass scaffolding is initialized without
-        # mutating tokenizer/model vocab. Trained E2W will own token registration.
+        # transformers>=4.51, so query tokens stay NON-VOCAB held nn.Parameter
+        # (overlay.attach_e2w_heads); vocab untouched. Training keeps them non-vocab
+        # (spec §1.2): set those Parameters requires_grad=True + attach LoRA — do NOT
+        # add token registration/embedding-resize.
         model.seg_dir_idx = tokenizer.convert_tokens_to_ids("[SEG_DIR]")
         model.seg_ind_idx = tokenizer.convert_tokens_to_ids("[SEG_IND]")
         model.edit_token_idx = tokenizer.convert_tokens_to_ids("[EDIT]")

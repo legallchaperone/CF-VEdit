@@ -9,8 +9,8 @@ heads onto the loaded instance at runtime:
   vocab rows. The tokenizer/vocab is never resized, so the vanilla ``[SEG]``
   ``generate()`` path stays byte-identical (this is what sidesteps the
   transformers>=4.51 embedding-resize hazard the planner comments flag).
-- ``edit_hidden_fcs`` projects each ``[EDIT]`` hidden state to the renderer's text
-  condition width (4096). It mirrors the stock ``text_hidden_fcs`` pattern.
+- ``edit_hidden_fcs`` projects each ``[EDIT]`` hidden state to the v0 renderer's
+  text-condition width — CogVideoX-Fun-InP's T5 (4096). Mirrors stock ``text_hidden_fcs``.
 - ``text_hidden_fcs`` (already on the model) is reused for the seg-layer queries
   (Sa2VA-plan change A: the seg query projection is shared, 01:43).
 
@@ -53,7 +53,7 @@ def attach_e2w_heads(model: Any, *, num_edit_slots: int = 4, renderer_condition_
     model.seg_ind_embed = _param(hidden)
     model.edit_embeds = _param(int(num_edit_slots), hidden)
 
-    # Per-slot [EDIT] hidden -> renderer condition width (4096). Random init; gets no
+    # Per-slot [EDIT] hidden -> v0 renderer text-condition width: CogVideoX-Fun T5 (4096). Random init; gets no
     # gradient inside localization (01:67-71) — trained jointly with the renderer.
     edit_fcs = nn.Sequential(
         nn.Linear(hidden, hidden), nn.ReLU(inplace=True),

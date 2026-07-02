@@ -37,6 +37,9 @@ class Operation(Enum):
     FORCE_EVENT = "force_event"
 
 
+# Edit-token width = the v0 renderer's text-condition width: CogVideoX-Fun-InP's
+# T5 d_model (4096). ADR-0007 renderer swap; the old Wan/UMT5 value was also 4096
+# (numeric coincidence). If the renderer's T5 width ever differs, update here.
 EDIT_TOKEN_DIM = 4096
 
 

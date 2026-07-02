@@ -144,6 +144,8 @@ class VoidRendererConfig:
     # "model_cpu_offload_and_qfloat8": inference, saves VRAM (BREAKS GRAD — float8).
     # "model_full_load": training, keeps grad to encoder_hidden_states (bf16).
     # "model_cpu_offload": inference, no float8.
+    # Stage 2 training HARD-REQUIRES model_full_load (spec §2 Stage 2 / §5.8):
+    # float8 silently breaks the edit-token gradient path with NO error.
     gpu_memory_mode: str = "model_cpu_offload_and_qfloat8"
     sample_size: tuple[int, int] = (384, 672)     # (H, W)
     num_frames: int = 85

@@ -12,6 +12,11 @@ runtime by `e2w_localization/overlay.py` (held `nn.Parameter` tokens, vocab
 untouched). That keeps `third_party/` byte-clean (B4) and the vanilla `[SEG]` path
 byte-identical, and sidesteps the transformers≥4.51 embedding-resize hazard.
 
-When training stands up (stage ②), the model that owns real token
-registration/resizing materializes from these patches against a pinned Sa2VA
-commit; until then this is a placeholder, not a build step.
+When training stands up (stage ②), the training fork attaches **LoRA** to the
+Sa2VA backbone and sets the overlay's non-vocab query-token `nn.Parameter`s
+(`seg_dir_embed`/`seg_ind_embed`/`edit_embeds`) `requires_grad=True`. It does
+**NOT** register tokens or resize embeddings — query tokens stay non-vocab per
+spec §1.2, keeping the transformers≥4.51 embedding-resize hazard sidestepped.
+These patches (dual-seg forward, `edit_hidden_fcs`) are the auditable source-level
+record of that fork's mechanism; until it stands up this is a placeholder, not a
+build step.
