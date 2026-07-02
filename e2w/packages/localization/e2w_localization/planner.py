@@ -18,6 +18,35 @@ from typing import Any, Iterable
 from e2w_core.masks import ThreeLayerMask
 from e2w_core.plan import EditPlan, Intervention, Operation
 
+# Load-bearing backbone tensors that MUST come from the checkpoint (not random init).
+# If any of these land in `missing_keys`, the Qwen2.5-VL backbone silently loaded as
+# random weights (the B1 failure) — every downstream stage is then built on noise.
+_REQUIRED_BACKBONE_KEYS = (
+    "model.model.language_model.embed_tokens.weight",
+    "model.model.language_model.layers.0.self_attn.q_proj.weight",
+)
+
+
+def _assert_backbone_loaded(loading_info: dict) -> None:
+    """Fail loud if the pretrained backbone did not load (B1 silent-random guard).
+
+    `from_pretrained(..., output_loading_info=True)` reports which model params were
+    NOT filled from the checkpoint. The Sa2VA checkpoint stores the backbone under keys
+    that already match this transformers version, so a correct load leaves these absent
+    from `missing_keys`. If they are present, weights are random and we must stop here
+    rather than emit shape-correct noise that looks like "untrained garbage by design".
+    """
+    missing = set(loading_info.get("missing_keys", []))
+    absent = [k for k in _REQUIRED_BACKBONE_KEYS if k in missing]
+    if absent:
+        raise RuntimeError(
+            "Sa2VA backbone failed to load from the checkpoint — these pretrained "
+            f"tensors are random-initialized: {absent}. Total missing_keys={len(missing)}. "
+            "This is the B1 silent-random-backbone failure (usually a stale `key_mapping` "
+            "rewriting checkpoint keys that already match). Refusing to proceed on random "
+            "weights."
+        )
+
 
 @dataclass(frozen=True)
 class PlannerConfig:
@@ -134,20 +163,20 @@ class CausalPlanner:
             # get_text_config(...).to_dict(), not a raw dict.
             model_config.text_config = PretrainedConfig.from_dict(text_config)
 
-        model = AutoModelForCausalLM.from_pretrained(
+        # The Sa2VA checkpoint stores the Qwen2.5-VL backbone under keys that already
+        # match this transformers version natively — NO key_mapping is needed. A rewrite
+        # here (the old B1 bug) silently leaves the entire backbone random-initialized.
+        model, loading_info = AutoModelForCausalLM.from_pretrained(
             self.config.weights_path,
             config=model_config,
             torch_dtype=dtype,
             device_map=self.config.device,
             trust_remote_code=True,
             attn_implementation="eager",
-            key_mapping={
-                # Current transformers removed the language_model wrapper and
-                # moved the visual tower one level up relative to Sa2VA's saved keys.
-                r"^model\.model\.language_model\.": "model.model.",
-                r"^model\.model\.visual\.": "model.visual.",
-            },
-        ).eval()
+            output_loading_info=True,
+        )
+        model = model.eval()
+        _assert_backbone_loaded(loading_info)  # B1 guard: refuse to run on random weights
         processor = AutoProcessor.from_pretrained(self.config.weights_path, trust_remote_code=True)
 
         if self.config.initialize_bypassed_heads:

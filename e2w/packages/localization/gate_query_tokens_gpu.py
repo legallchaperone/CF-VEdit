@@ -8,9 +8,17 @@ plain causal + arange mechanism — historical artifact, not this mechanism). Tw
   (b) 4D mask semantics really take effect: blocked edit->seg attention weight == 0
       across all layers/heads; positive control edit->edit nonzero; softmax row-sum ~1.
 
-Result (2026-07-02, seed=0, untrained): GATE PASS — (a) ok; (b) blocked max = 0.000
-over 28 layers, edit->edit ~3-6e-4, row-sum 1.0. Mechanism runs to spec on the real
-checkpoint (untrained -> mask/token content is garbage by design; not checked here).
+CAVEAT: this gate's checks are weight-independent (additive -inf -> softmax 0 regardless
+of QK; get_rope_index depends on ids/grid/config, not weights). It does NOT by itself
+prove the pretrained backbone loaded — that is enforced separately by planner._load_model's
+_assert_backbone_loaded guard (B1). The earlier "edit->edit ~3-6e-4" numbers were recorded
+on a silently random-initialized backbone (B1 bug) and are NOT representative.
+
+Result (2026-07-02, seed=0, untrained, B1-fixed real backbone / missing_keys=0): GATE PASS
+— (a) ok; (b) blocked max = 0.000 over 28 layers, edit->edit range [5.9e-4, 7.3e-2] (early
+layers up to ~7e-2 with real weights, vs uniform ~1e-4 on the old random backbone), row-sum
+~1.0. Mechanism runs to spec (untrained -> mask/token content is garbage by design; not
+checked here).
 
 Verify-only, mutates nothing on disk, vocab untouched. Run:
   CUDA_VISIBLE_DEVICES=<idle> /data/cwx/conda/envs/void/bin/python <this>
