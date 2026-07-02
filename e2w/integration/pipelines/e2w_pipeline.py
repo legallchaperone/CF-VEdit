@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from e2w_generation.abduction import WanAbductor
-from e2w_generation.renderer import GatedRenderer, RendererConfig
+from e2w_generation.void_abduction import CogVideoXAbductor
+from e2w_generation.void_renderer import VoidRenderer, VoidRendererConfig
 from e2w_localization.planner import CausalPlanner, PlannerConfig
 
 
@@ -45,40 +45,30 @@ def build_v0_pipeline(config_path: str | Path) -> "E2WPipeline":
         dtype=vanilla.get("dtype", "bfloat16"),
         **vanilla.get("localization", {}),
     )
+    # Renderer = frozen CogVideoX-Fun/VOID pass1 (ADR-0007). Render params
+    # (sample_size/num_frames/steps/guidance/negative/out_size) are fixed to
+    # reproduce VOID pass1 (verified in M2) and live as VoidRendererConfig
+    # defaults; config only overrides gpu_memory_mode (float8 infer vs bf16
+    # full-load for training) and seed.
     gen = vanilla.get("generation", {})
-    renderer_cfg = RendererConfig(
-        weights_path=weights["wan2_2_vace_fun_a14b"]["path"],
-        videox_fun_root=str((e2w_root / gen["videox_fun_root"]).resolve()),
-        config_path=str((e2w_root / gen["config_path"]).resolve()),
+    void = weights["cogvideox_fun_void"]
+    renderer_cfg = VoidRendererConfig(
+        base_path=void["base_path"],
+        void_pass1_path=void["void_pass1_path"],
         device=vanilla.get("device", "cuda:0"),
-        dtype=vanilla.get("dtype", "bfloat16"),
-        sample_size=tuple(gen.get("sample_size", [480, 832])),
-        fps=int(gen.get("fps", 12)),
-        num_inference_steps=int(gen.get("num_inference_steps", 20)),
-        guidance_scale=float(gen.get("guidance_scale", 5.0)),
-        negative_prompt=gen.get("negative_prompt", "low quality"),
-        sampler_name=gen.get("sampler_name", "Flow"),
-        shift=float(gen.get("shift", 12.0)),
-        gpu_memory_mode=gen.get("gpu_memory_mode", "sequential_cpu_offload"),
-        enable_teacache=bool(gen.get("enable_teacache", True)),
-        teacache_threshold=float(gen.get("teacache_threshold", 0.10)),
-        num_skip_start_steps=int(gen.get("num_skip_start_steps", 5)),
-        cfg_skip_ratio=gen.get("cfg_skip_ratio", 0),
-        vace_context_scale=float(gen.get("vace_context_scale", 1.0)),
-        paste_back_source_latent=bool(gen.get("paste_back_source_latent", True)),
-        paste_noise_to_timestep=bool(gen.get("paste_noise_to_timestep", True)),
-        mask_feather_latent=bool(gen.get("mask_feather_latent", True)),
-        seed=int(gen.get("seed", 43)),
+        weight_dtype=vanilla.get("dtype", "bfloat16"),
+        gpu_memory_mode=gen.get("gpu_memory_mode", "model_cpu_offload_and_qfloat8"),
+        seed=int(gen.get("seed", 42)),
     )
     return E2WPipeline(
-        abductor=WanAbductor(),
+        abductor=CogVideoXAbductor(),
         planner=CausalPlanner(planner_cfg),
-        renderer=GatedRenderer(renderer_cfg),
+        renderer=VoidRenderer(renderer_cfg),
     )
 
 
 class E2WPipeline:
-    def __init__(self, *, abductor: WanAbductor, planner: CausalPlanner, renderer: GatedRenderer):
+    def __init__(self, *, abductor: CogVideoXAbductor, planner: CausalPlanner, renderer: VoidRenderer):
         self.abductor = abductor
         self.planner = planner
         self.renderer = renderer
@@ -93,7 +83,7 @@ class E2WPipeline:
             operation=operation,
             vanilla=vanilla,
         )
-        # Vanilla: [EDIT] bypassed, VACE receives the native instruction string.
-        # Full A.1: VACE receives the planner's edit_tokens as the content condition.
+        # Vanilla: [EDIT] bypassed, renderer receives the native instruction string (T5).
+        # Full A.1: renderer's T5 text position is hard-replaced by planner edit_tokens.
         edit_condition = instruction if vanilla else plan.edit_tokens
         return self.renderer.render(source, edit_condition, mask, out_path=out_path)
