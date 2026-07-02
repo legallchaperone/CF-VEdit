@@ -18,8 +18,10 @@ All weights are random/identity init — V0 is UNTRAINED, so the masks/edit_toke
 this produces are shape-correct garbage by design. The corresponding train fork's
 source-level diff lives, unapplied, under ``patches/`` for auditability.
 
-Verified working end-to-end on the real checkpoint by ``spike_query_tokens.py``
-(query-token forward + M-RoPE + dual SAM2 path).
+Verified end-to-end on the real checkpoint by ``gate_query_tokens_gpu.py`` (current
+4D-mask + tied-RoPE mechanism; forward + M-RoPE + dual SAM2 path, with a fail-loud
+backbone-load guard). ``spike_query_tokens.py`` is the older pre-ADR-0006 artifact
+(plain causal + arange), not this mechanism.
 """
 from __future__ import annotations
 

@@ -58,7 +58,7 @@ Replaces the abduction/Pearl-framed novelties below. See spec §0.
 |---|---|---|---|
 | B1 benchmark imports 0 model packages | — | import-linter contract (`pyproject.toml`) | ◑ contract written, CI wiring TODO |
 | B3 localization ⟂ generation | — | import-linter independence contract | ◑ |
-| B4 vendored upstream has no in-place diff | `third_party/` (`sa2va`, `vace`, `wan2_2`, `videox_fun`); deltas in `e2w_localization/overlay.py` (runtime composition) + `localization/patches/` (unapplied) | CI third_party-clean check | ◑ Sa2VA heads added by runtime composition onto the loaded snapshot; `third_party/` byte-clean (ADR-0004) |
+| B4 vendored upstream has no in-place diff | `third_party/` (`sa2va`, `void_videox_fun`; the Wan/VACE `vace`/`wan2_2`/`videox_fun` submodules removed with the VACE/Wan renderer, ADR-0007); deltas in `e2w_localization/overlay.py` (runtime composition) + `localization/patches/` (unapplied) | CI third_party-clean check | ◑ Sa2VA heads added by runtime composition onto the loaded snapshot; `third_party/` byte-clean (ADR-0004) |
 | B5 train/eval sources disjoint | `provenance.jsonl` | leakage check | ◑ provenance carries evidence; cross-source check TODO |
 
 ## Pipeline & training
@@ -72,7 +72,9 @@ Replaces the abduction/Pearl-framed novelties below. See spec §0.
 > code needs `qwen_vl_utils`. Known gap: `E2WPipeline.edit()` keeps both models
 > resident (no `planner.unload()`); fine on 97GB, adapter's two-phase path
 > handles small GPUs. The rows below describe the **superseded** VACE/Wan
-> implementation (`e2w_generation/renderer.py`), kept for history (🔁 ADR-0007).
+> implementation (`e2w_generation/renderer.py`/`abduction.py`), **now removed from
+> the tree** along with the `vace`/`wan2_2`/`videox_fun` submodules (🔁 ADR-0007);
+> rows kept for history, file pointers are historical.
 > v0's Stage 0/1/2 training has no code rows yet; Stage -1 pre-experiment done
 > (spec §2 result).
 
