@@ -11,8 +11,11 @@ positions drive:
 - ``text_hidden_fcs`` -> SAM2 (dual pass) -> DIRECT and INDIRECT masks
 - ``edit_hidden_fcs`` -> ``edit_tokens`` (Nt, 4096) for the renderer
 
-Untrained -> the masks/tokens are shape-correct garbage by design (V0). The
-mechanism was validated on the real checkpoint by ``spike_query_tokens.py``.
+Untrained -> the masks/tokens are shape-correct garbage by design (V0). This
+current 4D-mask + tied-RoPE mechanism is validated on the real checkpoint by
+``gate_query_tokens_gpu.py`` (GATE PASS 2026-07-02: forward runs; edit->seg
+attention weight == 0 across all layers). (``spike_query_tokens.py`` is the older
+pre-ADR-0006 artifact — plain causal + arange, not this mechanism.)
 
 This is NOT teacher forcing (ADR-0004 amendment): there is no loss and no ground
 truth being substituted for the model's own output here, only an unconditional
