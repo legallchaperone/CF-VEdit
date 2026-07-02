@@ -25,6 +25,11 @@
       "low_noise_model": "/data/cwx/Wan2.2-VACE-Fun-A14B/low_noise_model/diffusion_pytorch_model.safetensors",
       "vae": "/data/cwx/Wan2.2-VACE-Fun-A14B/Wan2.1_VAE.pth",
       "text_encoder": "/data/cwx/Wan2.2-VACE-Fun-A14B/models_t5_umt5-xxl-enc-bf16.pth"
+    },
+    "cogvideox_fun_void": {
+      "note": "E2W v0 renderer (ADR-0007): CogVideoX-Fun-V1.5-5b-InP + VOID void_pass1, frozen, pass1 only. Consumed by e2w_generation/void_renderer.py.",
+      "base_path": "/data/cwx/void-model/CogVideoX-Fun-V1.5-5b-InP",
+      "void_pass1_path": "/data/cwx/void-model/void_pass1.safetensors"
     }
   }
 }
