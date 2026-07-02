@@ -6,18 +6,34 @@ The drift radar (Repo-Design §4②). Read it two ways:
 - **module with no proposal anchor = scope creep** (something built but unpromised).
 
 Every PR updates this table. Status legend: ✅ done · ◑ contract/partial ·
-⬜ not started · ⏸ deferred (see [SCOPE.md](SCOPE.md)).
+⬜ not started · ⏸ deferred (see [SCOPE.md](SCOPE.md)) · 🔁 superseded (see
+[ADR-0007](adr/0007-e2w-v0-remove-only-void-renderer.md), row kept for history.
 
 The ⬜/◑ model rows are turned green by the build spec — each row maps to an
 acceptance gate in [docs/build/05-acceptance-and-tasks.md](build/05-acceptance-and-tasks.md).
+**As of ADR-0007 (2026-07-02) the build spec's target architecture (VACE/Wan
+renderer, MLLM abduction) is itself superseded for v0** — see
+[`E2W-v0-Remove-Only-Spec.md`](../../E2W-v0-Remove-Only-Spec.md) at repo root
+for the current build target; `docs/build/01`/`02` rows below have not yet
+been reworked to match it (docs landed first, per ADR-0007's own decision).
 
-## The three true novelties (architecture §A.7 — the reason this beats Bernini)
+## The three true novelties — v0 framing (ADR-0007, current)
+
+Replaces the abduction/Pearl-framed novelties below. See spec §0.
 
 | claim | module | guarding test | status |
 |---|---|---|---|
-| ① abduction = source inversion to latent as invariant prior (the U) | `generation/e2w_generation/abduction.py` (+ `encode_only` G1 hook) + `generation/e2w_generation/renderer.py` (`encode_source_to_latent`, noised+feathered paste-back) + `e2w_core.latent` | V0 smoke: Wan source latent materialized; UNCHANGED latent paste-back (noised-to-timestep + feather) | ◑ encode in V0; flow-inversion deferred (ADR-0005) |
-| ② the **indirect / multi-hop** layer of the three-layer mask (the 命门) | `localization/e2w_localization/{overlay,query_tokens,planner}.py` (full: query-token `[SEG_DIR]/[SEG_IND]` → real direct+indirect; vanilla: stock `[SEG]`→direct, indirect empty) + `data_engine` TODO | predicted indirect mask aligns to sim dependency graph | ◑ full path builds a **real (untrained) indirect** mask end-to-end (ADR-0004); semantics need training |
-| ③ abduction-bound invariant-preservation loss | `generation/e2w_generation/losses` | `不改变` region V̂ latent must equal source latent | ⏸ no training in V0 |
+| (a) physics-consequence-aware removal task (vs. photometric-only concurrent work) | benchmark `operation=remove` subset + contract `affected_regions`/`counterfactual_state` | CF-VEdit remove subset IP×CR vs VOID (`results/void/`) | ⬜ not started |
+| (b) controlled comparison: renderer + mask mechanism identical to VOID, only conditioning source varies | `integration/adapters/e2w_adapter.py` (v0 rework pending) using frozen CogVideoX-Fun + `void_pass1.safetensors` | VOID-oracle-quadmask+edit-token ablation cell (spec §3) isolates the one variable | ⬜ renderer not yet ported off VACE/Wan in code |
+| (c) seg/edit dual-branch, asymmetric differentiability made precise (edit branch end-to-end differentiable through frozen renderer; seg branch is not — quadmask thresholding blocks gradient) | `localization/e2w_localization/{overlay,query_tokens}.py` (6 fixed-position query tokens: `seg_dir,seg_ind,edit_0..3`; custom 4D attention mask; tied RoPE) | Stage 0: held-out mask IoU/Dice. Stage 2: edit-token cosine-collapse check (spec §2 Stage 1 note) | ◑ query-token mechanism exists (ADR-0004/0006) targeting old renderer; Stage 0–2 training not started |
+
+## Superseded novelties (pre-ADR-0007, kept for history)
+
+| claim | module | guarding test | status |
+|---|---|---|---|
+| ① abduction = source inversion to latent as invariant prior (the U) | `generation/e2w_generation/abduction.py` (+ `encode_only` G1 hook) + `generation/e2w_generation/renderer.py` (`encode_source_to_latent`, noised+feathered paste-back) + `e2w_core.latent` | V0 smoke: Wan source latent materialized; UNCHANGED latent paste-back (noised-to-timestep + feather) | 🔁 dropped for v0, not deferred — no MLLM-inversion step in the remove-only design; unchanged-region conditioning now comes from VOID's mask+masked-latent channel-concat instead |
+| ② the **indirect / multi-hop** layer of the three-layer mask (the 命门) | `localization/e2w_localization/{overlay,query_tokens,planner}.py` (full: query-token `[SEG_DIR]/[SEG_IND]` → real direct+indirect; vanilla: stock `[SEG]`→direct, indirect empty) + `data_engine` TODO | predicted indirect mask aligns to sim dependency graph | 🔁 mechanism carries into v0 as `seg_ind` (see novelty (c) above); this row's VACE/Wan-renderer target is stale |
+| ③ abduction-bound invariant-preservation loss | `generation/e2w_generation/losses` | `不改变` region V̂ latent must equal source latent | 🔁 dropped for v0 — renderer is frozen throughout v0 training (Stages 0–2), no loss to bind; unchanged-region fidelity is architectural (VOID gating) not learned |
 
 ## Shared contracts (e2w_core — the seam)
 
@@ -47,9 +63,16 @@ acceptance gate in [docs/build/05-acceptance-and-tasks.md](build/05-acceptance-a
 
 ## Pipeline & training
 
+> **The rows below target the pre-ADR-0007 VACE/Wan renderer.** They describe
+> real, working code (`e2w_generation/renderer.py` et al.) that has not yet
+> been reworked for the v0 frozen-CogVideoX-Fun/`void_pass1` target — see
+> ADR-0007 Consequences. Read them as "what's built on the old target," not as
+> v0 progress; v0's own Stage -1/0/1/2 plan (spec §2) has no rows here yet
+> because no code exists against it.
+
 | claim | module | guarding test | status |
 |---|---|---|---|
-| render seam solved in one pass (feather + joint denoise, no 2nd-pass) | `generation/e2w_generation/renderer.py` (noised-to-timestep paste `paste_noise_to_timestep`; soft feather `mask_feather_latent`) | V0 prediction run validates; A/B toggles vs 0.08 floor pending (ADR-0005) | ◑ seam fixes landed + run end-to-end; preservation A/B + human eval pending |
+| render seam solved in one pass (feather + joint denoise, no 2nd-pass) | `generation/e2w_generation/renderer.py` (noised-to-timestep paste `paste_noise_to_timestep`; soft feather `mask_feather_latent`) | V0 prediction run validates; A/B toggles vs 0.08 floor pending (ADR-0005) | ◑ seam fixes landed + run end-to-end; preservation A/B + human eval pending — **on the superseded VACE/Wan target (🔁 ADR-0007)** |
 | full (untrained) A.1: query-token 3-layer mask + edit_tokens → renderer | `localization/e2w_localization/{overlay,query_tokens}.py` + `generation/.../renderer.py` (edit_tokens via `_get_t5` override) + `integration/{pipelines,adapters}` (`--full`) | **single-sample** `e2w_full_smoke` on GPU: npz carries direct/real-indirect/edit_tokens; video written (ADR-0003). Benchmark-valid 12-sample run pending | ◑ runs end-to-end untrained; quality out of scope until training |
 | `edit_tokens` = continuous content condition to the renderer | `localization` `edit_hidden_fcs` (overlay) → `generation` `prompt_embeds` seam | full run feeds `edit_tokens (Nt,4096)` as positive cross-attn | ◑ wired + runs; no gradient until joint stage-② training |
 | query-token attention: `[EDIT]` slots bidirectional + tied position id, isolated from `[SEG_DIR]`/`[SEG_IND]` | `localization/e2w_localization/query_tokens.py` (`_build_query_attention_mask`, `_continuation_offsets`) | unit test on mask connectivity + offset symmetry (no GPU needed) | ◑ mask + position tying fixed pre-training (ADR-0006); semantic effect only observable once training starts |

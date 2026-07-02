@@ -1,5 +1,13 @@
 # Counterfactual Video Editing — Proposal (beating Bernini on causal/counterfactual edits)
 
+> **⚠️ Superseded for the current build.** The architecture/novelty claims here
+> (5-block model, MLLM source-inversion abduction, VACE/Wan gated renderer) are
+> replaced for v0 by [[E2W-v0-Remove-Only-Spec]] — see
+> [ADR-0007](e2w/docs/adr/0007-e2w-v0-remove-only-void-renderer.md). This file
+> stays as the historical long-run thesis (open-domain edits, P1–P3); it is not
+> what v0 builds. Read `E2W-v0-Remove-Only-Spec.md` first if you're building or
+> reviewing the current system.
+
 > 目标:在「反事实编辑」任务上超越 Bernini。统一 Pearlian 最小改动 + 物理后果级联两种语义。
 > 关联笔记:[[Bernini]] · 表示选择见 [[Bernini]] 的 "The Representations"。
 

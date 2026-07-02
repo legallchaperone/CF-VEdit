@@ -13,11 +13,12 @@ The deliberate sequencing (`CF-VEdit-Repo-Design.md` §5): **build the ruler (be
 
 ### The design docs (read these before changing the benchmark's shape)
 
-- `Counterfactual-Video-Editing-Proposal.md` — the research proposal.
-- `CF-VEdit-Architecture-and-Narrative (给人看的）.md` — human-facing architecture + naming.
-- `CF-VEdit-Benchmark-Spec.md` — **the executable spec for the benchmark below.** Every structural rule in `physics_iq_for_simple_eval/` traces to a section here.
-- `Sa2VA-Modification-Plan.md` — plan for the localization half (Sa2VA deltas).
-- `CF-VEdit-Repo-Design.md` — boundaries, reuse strategy, and anti-drift mechanisms for the full monorepo.
+- `E2W-v0-Remove-Only-Spec.md` — **the current authoritative build spec for the model** (remove-only, frozen CogVideoX-Fun/VOID renderer, query-token planner). Read this first if you're building or reviewing `e2w/`. Supersedes the architecture/novelty content of the four docs below for v0 — see `e2w/docs/adr/0007-e2w-v0-remove-only-void-renderer.md`.
+- `Counterfactual-Video-Editing-Proposal.md` — the original research proposal (long-run open-domain thesis; superseded for v0, kept as historical record).
+- `CF-VEdit-Architecture-and-Narrative (给人看的）.md` — human-facing architecture + naming (same superseded status).
+- `CF-VEdit-Benchmark-Spec.md` — **the executable spec for the benchmark below.** Every structural rule in `physics_iq_for_simple_eval/` traces to a section here. Not affected by the v0 pivot.
+- `Sa2VA-Modification-Plan.md` — original plan for the localization half (Sa2VA deltas); §1 changes A/B carry into v0 respecified, §2–3 (VACE/Wan) do not.
+- `CF-VEdit-Repo-Design.md` — boundaries, reuse strategy, and anti-drift mechanisms for the full monorepo. Not affected by the v0 pivot.
 
 ## Working in the benchmark (`physics_iq_for_simple_eval/`)
 

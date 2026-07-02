@@ -1,5 +1,15 @@
 # 基于 Sa2VA 的改动 plan(搭我们系统的「定位半」)
 
+> **⚠️ Superseded for the current build.** §1 changes A/B (split `[SEG]` into
+> `[SEG_DIR]`/`[SEG_IND]`; add edit tokens) are retained in spirit but
+> respecified precisely (6 fixed-position query tokens, custom 4D attention
+> mask, tied RoPE) in [[E2W-v0-Remove-Only-Spec]] §1.2–1.4. §2–3 below (the
+> generation half = VACE/Wan) is **wrong for v0** — the renderer is now frozen
+> CogVideoX-Fun-V1.5-5b-InP initialized from VOID's `void_pass1.safetensors`.
+> See [ADR-0007](e2w/docs/adr/0007-e2w-v0-remove-only-void-renderer.md). Kept
+> as historical record of the original Sa2VA delta analysis (§0's file-level
+> facts about Sa2VA internals are still accurate and reusable).
+
 > 结论先放:**用 Sa2VA 改,能把「因果 Planner + Mask 解码器」(也就是"决定改哪块"的那半)直接拿到手——这是工程上最琐碎的一半,基本现成。** 但「Abduction 源反演」和「门控 Renderer」(也就是"实际生成"的那半)**不在 Sa2VA 里**,要靠 VACE/Wan 另起;而真正的研究风险——三层因果 mask 里的「间接/多跳」连带——Sa2VA 只给机制、不给因果智能,要靠我们加数据+监督。
 > 仓库:`github.com/bytedance/Sa2VA`(Apache-2.0)· 用 `Sa2VA-Qwen2_5-VL-7B` 这个 variant。
 

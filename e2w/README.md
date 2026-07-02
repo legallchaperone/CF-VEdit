@@ -6,13 +6,19 @@ produce the target video where the directly-touched region is re-rendered, the
 The thesis (vs. Bernini): treat editing as `abduction + do() + causal closure +
 invariant constraint`, not as "write the prompt in more detail".
 
-> **New here? Read [`docs/proposal/`](docs/proposal/README.md) first** — the four
-> design notes are the canonical source of truth. Then read [`AGENTS.md`](AGENTS.md)
-> (the repo constitution: five boundaries + change discipline).
+> **New here? Read [`../E2W-v0-Remove-Only-Spec.md`](../E2W-v0-Remove-Only-Spec.md)
+> first** — the current authoritative build spec (remove-only, frozen
+> CogVideoX-Fun/VOID renderer). See
+> [ADR-0007](docs/adr/0007-e2w-v0-remove-only-void-renderer.md) for why. The
+> four notes in [`docs/proposal/`](docs/proposal/README.md) are the long-run
+> open-domain thesis — still canonical for research direction, superseded for
+> v0's concrete architecture. Then read [`AGENTS.md`](AGENTS.md) (the repo
+> constitution: five boundaries + change discipline).
 >
-> **Building the model?** The implementation-ready plan — edit Sa2VA, adapt
-> VACE/Wan, sim data engine, three-stage training, acceptance gates — is in
-> [`docs/build/`](docs/build/README.md).
+> **Building the model?** [`docs/build/`](docs/build/README.md) has the
+> implementation-ready plan, but its renderer target (VACE/Wan) and abduction
+> step are pre-pivot — see its own banner. Code has not yet been reworked to
+> the v0 spec (docs landed first, per ADR-0007).
 
 ## Status: skeleton
 

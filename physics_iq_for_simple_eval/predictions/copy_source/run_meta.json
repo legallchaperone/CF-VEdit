@@ -2,7 +2,7 @@
   "baseline_type": "copy_source",
   "benchmark_version": "0.1.0",
   "command": "python baselines/copy_source.py --run-name copy_source",
-  "created_at": "2026-06-18T16:09:35Z",
+  "created_at": "2026-06-20T05:03:23Z",
   "hardware": {},
   "manifest_sha256": "6d94a071a11ad124ad07a2b85de8e357e62fd7ea8ea292aa8a207860fc636cfe",
   "model_name": "copy_source",

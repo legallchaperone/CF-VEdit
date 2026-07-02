@@ -1,5 +1,13 @@
 # 02 — Generation half: abduction inversion + gated renderer (VACE/Wan)
 
+> **⚠️ Superseded for v0 (ADR-0007).** v0 drops the abduction source-inversion
+> step entirely and swaps VACE/Wan for a **frozen CogVideoX-Fun-V1.5-5b-InP**
+> initialized from VOID's `void_pass1.safetensors` — see
+> [`E2W-v0-Remove-Only-Spec.md`](../../../E2W-v0-Remove-Only-Spec.md) §1.3–1.5.
+> Novelties ① and ③ referenced below are dropped for v0, not built here; see
+> TRACEABILITY's "Superseded novelties" table. This doc describes the
+> pre-pivot target; existing `e2w_generation` code has not yet been ported.
+
 > Builds the **Abduction source inversion** and the **gated Renderer** (actually
 > renders the result). Reuses Wan2.2 (DiT + VAE) and VACE (masked-V2V
 > conditioning). Implements architecture §A.2【1】+【4】 and §A.5. Home of true

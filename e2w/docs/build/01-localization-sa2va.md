@@ -1,5 +1,11 @@
 # 01 — Localization half: editing Sa2VA
 
+> **⚠️ Query-token design carries over to v0 but is respecified precisely**
+> in [`E2W-v0-Remove-Only-Spec.md`](../../../E2W-v0-Remove-Only-Spec.md)
+> §1.2–1.4 (6 fixed-position tokens `seg_dir,seg_ind,edit_0..3`, custom 4D
+> attention mask, tied RoPE) — see ADR-0007. What this doc calls the
+> "edit-token path" no longer targets VACE/Wan (see [02]'s banner).
+
 > Builds the **Causal Planner + Mask decoder** (decides *which regions change*).
 > Reuses Sa2VA's instruction→mask machinery; we add the three-layer split, the
 > edit-token path, the CF dataset, and the config. Implements architecture

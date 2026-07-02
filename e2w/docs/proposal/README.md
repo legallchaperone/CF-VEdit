@@ -1,5 +1,12 @@
 # docs/proposal — proposal-as-truth
 
+> **v0's concrete architecture is now [`E2W-v0-Remove-Only-Spec.md`](<../../../E2W-v0-Remove-Only-Spec.md>)**,
+> not the architecture/sa2va-plan notes below — see
+> [ADR-0007](../adr/0007-e2w-v0-remove-only-void-renderer.md). The four notes
+> remain canonical for the long-run open-domain research direction (why this
+> approach, P1–P3); their specific architecture claims (abduction-as-latent-
+> prior, VACE/Wan renderer) are superseded for the current build.
+
 The four design notes are the **canonical source of truth**. The repo's shape is
 derived from them; when design and code disagree, the design wins, and you change
 the design here *first* (AGENTS.md, discipline rule 1).
