@@ -47,6 +47,10 @@ def call_gemini(api_key, messages, model, timeout=180, retries=3):
     raise last
 
 
+def _source_frame_count(mrow, source, fallback, vlm_judge):
+    return mrow.get("video_meta", {}).get("num_frames") or vlm_judge.probe_num_frames(source) or fallback
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("run")
@@ -80,7 +84,7 @@ def main():
             continue
         source = root / mrow["source_video"]
         edited = run_dir / pred["video"]
-        sframes = mrow.get("video_meta", {}).get("num_frames") or args.frames
+        sframes = _source_frame_count(mrow, source, args.frames, vj)
         eframes = vj.probe_num_frames(edited) or sframes
         print(f"[gemini] judging {sid} ({ok_ids.index(sid)+1}/{len(ok_ids)})", file=sys.stderr)
         messages = vj.build_messages(

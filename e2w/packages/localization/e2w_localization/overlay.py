@@ -20,8 +20,8 @@ source-level diff lives, unapplied, under ``patches/`` for auditability.
 
 Verified end-to-end on the real checkpoint by ``gate_query_tokens_gpu.py`` (current
 4D-mask + tied-RoPE mechanism; forward + M-RoPE + dual SAM2 path, with a fail-loud
-backbone-load guard). ``spike_query_tokens.py`` is the older pre-ADR-0006 artifact
-(plain causal + arange), not this mechanism.
+backbone-load guard). The removed ``spike_query_tokens.py`` artifact used the older
+pre-ADR-0006 plain-causal + arange mechanism.
 """
 from __future__ import annotations
 

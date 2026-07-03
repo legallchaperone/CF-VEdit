@@ -17,14 +17,14 @@ invariant constraint`, not as "write the prompt in more detail".
 >
 > **Building the model?** [`docs/build/`](docs/build/README.md) has the
 > implementation-ready plan, but its renderer target (VACE/Wan) and abduction
-> step are pre-pivot — see its own banner. Code has not yet been reworked to
-> the v0 spec (docs landed first, per ADR-0007).
+> step are pre-pivot — see its own banner. The v0 renderer path has since been
+> ported to CogVideoX-Fun/VOID; the build docs remain historical until refreshed.
 
-## Status: skeleton
+## Status: v0 scaffold plus remove-only renderer path
 
-This is the scaffold the design prescribes — **ruler before machine, contracts
-before halves** (Repo-Design §5). Only `e2w_core` (the seam) carries real types
-today; the two model halves are stubs with READMEs that back-link to the spec.
+This keeps the scaffold the design prescribes — **ruler before machine,
+contracts before halves** (Repo-Design §5). `e2w_core` carries the seam types;
+`localization` and `generation` now include the v0 remove-only adapter path.
 The working P0 benchmark still lives at
 [`../physics_iq_for_simple_eval/`](../physics_iq_for_simple_eval/) and is *not*
 migrated yet (see [ADR-0002](docs/adr/0002-scaffold-alongside-without-migration.md)).
@@ -42,7 +42,7 @@ e2w/
 │   ├── e2w_core/        ★ shared contracts (masks, plan, latent, io) — the seam
 │   ├── cf_vedit_bench/  the benchmark (currently a pointer to the live P0)
 │   ├── localization/    定位半: Causal Planner + Mask decoder (from Sa2VA)
-│   ├── generation/      生成半: Abduction inversion + gated Renderer (from VACE/Wan)
+│   ├── generation/      生成半: CogVideoX-Fun/VOID source payload + renderer
 │   └── data_engine/     Kubric-style sim pairs + dependency-graph labels
 ├── integration/         端到端 pipelines + adapters → write predictions/
 └── configs/  scripts/  tools/   guards (import-linter, schema lint, proposal-link)

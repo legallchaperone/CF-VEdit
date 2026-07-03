@@ -18,6 +18,7 @@
       "resolved_checkpoint": "/data/cwx/void-assets/sam2_hiera_large.pt"
     },
     "wan2_2_vace_fun_a14b": {
+      "note": "Historical/downloaded weight index only. Current E2W v0 code does not consume this block; active renderer is cogvideox_fun_void.",
       "repo_id": "alibaba-pai/Wan2.2-VACE-Fun-A14B",
       "revision": "4438caabbfdd7437bbb0283d86cb200d1b7223ba",
       "path": "/data/cwx/Wan2.2-VACE-Fun-A14B",

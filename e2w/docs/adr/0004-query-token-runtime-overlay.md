@@ -42,8 +42,9 @@ Work entirely in **`inputs_embeds` space; never mutate tokenizer/vocab.**
 
 - **+** Sidesteps the resize hazard *and* B4 at once: vocab untouched → the vanilla
   `[SEG]` `generate()` path is byte-identical; nothing in `third_party/` changes.
-- **+** Validated on the real checkpoint (`spike_query_tokens.py` and a
-  single-sample full run): forward runs, hidden recovered `(1, 2+N, 3584)`, dual
+- **+** Initially validated on the real checkpoint by the since-removed
+  `spike_query_tokens.py` (superseded by `gate_query_tokens_gpu.py`) and a
+  single-sample full run: forward runs, hidden recovered `(1, 2+N, 3584)`, dual
   SAM2 yields real `(T,H,W)` direct **and** indirect masks, `edit_tokens (Nt,4096)`.
   The spike confirmed the **`get_rope_index+extend`** M-RoPE path specifically (it
   prints the mode). Because `_position_ids` falls back to a plain `arange` on any

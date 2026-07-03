@@ -14,8 +14,8 @@ positions drive:
 Untrained -> the masks/tokens are shape-correct garbage by design (V0). This
 current 4D-mask + tied-RoPE mechanism is validated on the real checkpoint by
 ``gate_query_tokens_gpu.py`` (GATE PASS 2026-07-02: forward runs; edit->seg
-attention weight == 0 across all layers). (``spike_query_tokens.py`` is the older
-pre-ADR-0006 artifact — plain causal + arange, not this mechanism.)
+attention weight == 0 across all layers). The removed ``spike_query_tokens.py``
+artifact used the older pre-ADR-0006 plain-causal + arange mechanism.
 
 This is NOT teacher forcing (ADR-0004 amendment): there is no loss and no ground
 truth being substituted for the model's own output here, only an unconditional
