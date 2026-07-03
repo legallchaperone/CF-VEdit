@@ -1,0 +1,3 @@
+[submodule "e2w/packages/localization/third_party/sa2va"]
+	path = e2w/packages/localization/third_party/sa2va
+	url = https://github.com/bytedance/Sa2VA.git

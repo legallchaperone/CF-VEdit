@@ -1,5 +1,12 @@
 # CF-VEdit:架构设计 + Pearl 叙事
 
+> **⚠️ Superseded for the current build.** The four-block pipeline and Pearl
+> narrative below (abduction source-inversion, VACE/Wan gated renderer) are
+> replaced for v0 by [[E2W-v0-Remove-Only-Spec]] — see
+> [ADR-0007](e2w/docs/adr/0007-e2w-v0-remove-only-void-renderer.md). Kept as the
+> historical long-run architecture (open-domain edits, P1–P3); not what v0
+> builds.
+
 > 本文把两件事**刻意拆开**:
 > Part A 只讲**怎么搭这个系统**(具体、可实现、不带数学)。
 > Part B 才用 **Pearl 的因果阶梯**给同一套系统**包装叙事**(为什么它在原理上是对的)。

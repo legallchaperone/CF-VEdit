@@ -1,0 +1,4 @@
+# Runtime deps for e2w_localization (Sa2VA planner) beyond torch/transformers.
+# Sa2VA loads Qwen2.5-VL via remote code, which imports qwen_vl_utils at runtime;
+# a fresh env without it fails inside planner.plan(). See TRACEABILITY.md.
+qwen_vl_utils>=0.0.14

@@ -1,0 +1,19 @@
+{
+  "version": "v0-full-untrained-eval",
+  "weights_config": "weights.v0.json",
+  "device": "cuda:0",
+  "dtype": "bfloat16",
+  "localization": {
+    "frame_interval": 1,
+    "max_frames_for_segmentation": 21,
+    "edit_token_slots": 4,
+    "renderer_condition_dim": 4096,
+    "max_content_frames": 5,
+    "segmentation_prompt_template": "<image>Please segment {target_ref}. [SEG]"
+  },
+  "generation": {
+    "_note": "CogVideoX-Fun/VOID pass1 renderer (ADR-0007). Render params fixed in VoidRendererConfig to reproduce pass1. gpu_memory_mode=model_cpu_offload_and_qfloat8 is an E2W compatibility no-op: effective bf16 model_cpu_offload for VOID numerical parity, no float8 VRAM-saving claim. Stage 2 training MUST switch to model_full_load (spec §2 Stage 2 + §5.10).",
+    "gpu_memory_mode": "model_cpu_offload_and_qfloat8",
+    "seed": 42
+  }
+}

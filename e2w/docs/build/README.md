@@ -1,5 +1,18 @@
 # BUILD SPEC — how to build E2W from existing models
 
+> **⚠️ Target superseded for v0 (ADR-0007, 2026-07-02).** This build spec
+> (and 01/02 below) still describe the VACE/Wan2.2 renderer + MLLM-abduction
+> architecture. The current build target is
+> [`E2W-v0-Remove-Only-Spec.md`](../../../E2W-v0-Remove-Only-Spec.md) at repo
+> root: remove-only, frozen CogVideoX-Fun-V1.5-5b-InP renderer initialized from
+> VOID's `void_pass1.safetensors`, no MLLM source-inversion step. `00` and `03`–`05`
+> are largely orthogonal to the renderer choice and still apply in outline; `01`'s
+> query-token design (changes A/B) carries over but is respecified precisely in
+> the v0 spec §1.2–1.4; `02` (VACE/Wan renderer) does not apply to v0 at all.
+> Per ADR-0007, docs land first — these files have not yet been rewritten for
+> v0; treat the VACE/Wan-specific parts below as historical/pre-pivot, not as
+> current instructions to a coding agent.
+
 > **Audience:** a coding agent on a machine with disk + GPUs (≥8×A100 80GB for
 > training). **Goal:** turn the `e2w/` skeleton into a working counterfactual
 > video editor by *editing Sa2VA* (planner + mask decoder) and *adapting

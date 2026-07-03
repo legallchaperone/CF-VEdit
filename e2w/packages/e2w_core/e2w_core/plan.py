@@ -37,6 +37,26 @@ class Operation(Enum):
     FORCE_EVENT = "force_event"
 
 
+# Edit-token width = the v0 renderer's text-condition width: CogVideoX-Fun-InP's
+# T5 d_model (4096). ADR-0007 renderer swap; the old Wan/UMT5 value was also 4096
+# (numeric coincidence). If the renderer's T5 width ever differs, update here.
+EDIT_TOKEN_DIM = 4096
+
+
+def validate_edit_tokens_shape(shape: Any, *, slots: int, dim: int = EDIT_TOKEN_DIM) -> tuple[int, int]:
+    """Assert an ``edit_tokens`` array has shape ``(slots, dim)``; return it.
+
+    Pure / dependency-free so the full-path failure mode ("edit_tokens missing or
+    malformed must NOT silently fall back to text conditioning") is unit-testable
+    without numpy/torch. Raises ``ValueError`` on mismatch.
+    """
+    got = tuple(int(x) for x in shape)
+    want = (int(slots), int(dim))
+    if got != want:
+        raise ValueError(f"edit_tokens must have shape {want}, got {got}")
+    return want
+
+
 @dataclass(frozen=True)
 class Intervention:
     """Parsed ``do(X=x)`` — the Action step of abduction→action→prediction."""

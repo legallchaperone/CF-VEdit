@@ -8,7 +8,7 @@
 #   packages/e2w_core        contracts — depends on nothing internal (the seam)
 #   packages/cf_vedit_bench  benchmark — consumes predictions/, imports no model
 #   packages/localization    定位半 (Sa2VA-based)        -> e2w_core only
-#   packages/generation      生成半 (VACE/Wan-based)      -> e2w_core only
+#   packages/generation      生成半 (CogVideoX-Fun/VOID)  -> e2w_core only
 #   packages/data_engine     sim engine (Kubric-style)   -> e2w_core only
 #   integration              pipelines + adapters        -> e2w_core, both halves
 

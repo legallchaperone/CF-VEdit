@@ -6,19 +6,25 @@ produce the target video where the directly-touched region is re-rendered, the
 The thesis (vs. Bernini): treat editing as `abduction + do() + causal closure +
 invariant constraint`, not as "write the prompt in more detail".
 
-> **New here? Read [`docs/proposal/`](docs/proposal/README.md) first** — the four
-> design notes are the canonical source of truth. Then read [`AGENTS.md`](AGENTS.md)
-> (the repo constitution: five boundaries + change discipline).
+> **New here? Read [`../E2W-v0-Remove-Only-Spec.md`](../E2W-v0-Remove-Only-Spec.md)
+> first** — the current authoritative build spec (remove-only, frozen
+> CogVideoX-Fun/VOID renderer). See
+> [ADR-0007](docs/adr/0007-e2w-v0-remove-only-void-renderer.md) for why. The
+> four notes in [`docs/proposal/`](docs/proposal/README.md) are the long-run
+> open-domain thesis — still canonical for research direction, superseded for
+> v0's concrete architecture. Then read [`AGENTS.md`](AGENTS.md) (the repo
+> constitution: five boundaries + change discipline).
 >
-> **Building the model?** The implementation-ready plan — edit Sa2VA, adapt
-> VACE/Wan, sim data engine, three-stage training, acceptance gates — is in
-> [`docs/build/`](docs/build/README.md).
+> **Building the model?** [`docs/build/`](docs/build/README.md) has the
+> implementation-ready plan, but its renderer target (VACE/Wan) and abduction
+> step are pre-pivot — see its own banner. The v0 renderer path has since been
+> ported to CogVideoX-Fun/VOID; the build docs remain historical until refreshed.
 
-## Status: skeleton
+## Status: v0 scaffold plus remove-only renderer path
 
-This is the scaffold the design prescribes — **ruler before machine, contracts
-before halves** (Repo-Design §5). Only `e2w_core` (the seam) carries real types
-today; the two model halves are stubs with READMEs that back-link to the spec.
+This keeps the scaffold the design prescribes — **ruler before machine,
+contracts before halves** (Repo-Design §5). `e2w_core` carries the seam types;
+`localization` and `generation` now include the v0 remove-only adapter path.
 The working P0 benchmark still lives at
 [`../physics_iq_for_simple_eval/`](../physics_iq_for_simple_eval/) and is *not*
 migrated yet (see [ADR-0002](docs/adr/0002-scaffold-alongside-without-migration.md)).
@@ -36,7 +42,7 @@ e2w/
 │   ├── e2w_core/        ★ shared contracts (masks, plan, latent, io) — the seam
 │   ├── cf_vedit_bench/  the benchmark (currently a pointer to the live P0)
 │   ├── localization/    定位半: Causal Planner + Mask decoder (from Sa2VA)
-│   ├── generation/      生成半: Abduction inversion + gated Renderer (from VACE/Wan)
+│   ├── generation/      生成半: CogVideoX-Fun/VOID source payload + renderer
 │   └── data_engine/     Kubric-style sim pairs + dependency-graph labels
 ├── integration/         端到端 pipelines + adapters → write predictions/
 └── configs/  scripts/  tools/   guards (import-linter, schema lint, proposal-link)

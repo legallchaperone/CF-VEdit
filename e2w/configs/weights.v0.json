@@ -1,0 +1,36 @@
+{
+  "version": "v0-vanilla-eval",
+  "created_for": "E2W V0 vanilla eval",
+  "note": "Code must read model locations from this file; do not hardcode local paths in Python modules.",
+  "weights_root": "/data/cwx",
+  "models": {
+    "sa2va_qwen2_5_vl_7b": {
+      "repo_id": "ByteDance/Sa2VA-Qwen2_5-VL-7B",
+      "revision": "4cd6709067cf257235e922c201a6f265292f5fc8",
+      "path": "/data/cwx/Sa2VA-Qwen2_5-VL-7B",
+      "resolved_path": "/data/cwx/Edit2World-unified/checkpoints/Sa2VA-Qwen2_5-VL-7B"
+    },
+    "sam2_hiera_large": {
+      "repo_id": "facebook/sam2-hiera-large",
+      "revision": "e6a8e8809b8f1bfa2238b6d080f3d05cc76bd251",
+      "path": "/data/cwx/sam2-hiera-large",
+      "checkpoint": "/data/cwx/sam2-hiera-large/sam2_hiera_large.pt",
+      "resolved_checkpoint": "/data/cwx/void-assets/sam2_hiera_large.pt"
+    },
+    "wan2_2_vace_fun_a14b": {
+      "note": "Historical/downloaded weight index only. Current E2W v0 code does not consume this block; active renderer is cogvideox_fun_void.",
+      "repo_id": "alibaba-pai/Wan2.2-VACE-Fun-A14B",
+      "revision": "4438caabbfdd7437bbb0283d86cb200d1b7223ba",
+      "path": "/data/cwx/Wan2.2-VACE-Fun-A14B",
+      "high_noise_model": "/data/cwx/Wan2.2-VACE-Fun-A14B/high_noise_model/diffusion_pytorch_model.safetensors",
+      "low_noise_model": "/data/cwx/Wan2.2-VACE-Fun-A14B/low_noise_model/diffusion_pytorch_model.safetensors",
+      "vae": "/data/cwx/Wan2.2-VACE-Fun-A14B/Wan2.1_VAE.pth",
+      "text_encoder": "/data/cwx/Wan2.2-VACE-Fun-A14B/models_t5_umt5-xxl-enc-bf16.pth"
+    },
+    "cogvideox_fun_void": {
+      "note": "E2W v0 renderer (ADR-0007): CogVideoX-Fun-V1.5-5b-InP + VOID void_pass1, frozen, pass1 only. Consumed by e2w_generation/void_renderer.py.",
+      "base_path": "/data/cwx/void-model/CogVideoX-Fun-V1.5-5b-InP",
+      "void_pass1_path": "/data/cwx/void-model/void_pass1.safetensors"
+    }
+  }
+}
