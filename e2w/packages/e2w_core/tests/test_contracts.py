@@ -1,3 +1,4 @@
+import dataclasses
 import importlib.util
 import json
 import shutil
@@ -9,8 +10,18 @@ from e2w_core.masks import PIXEL_PRIORITY, MaskLayer, ThreeLayerMask, resolve_pi
 from e2w_core.plan import EDIT_TOKEN_DIM, EditPlan, Intervention, Operation, validate_edit_tokens_shape
 
 
+# tests/ -> e2w_core -> packages -> e2w -> repo root == parents[4]; if this file
+# moves, update the depth. The parity tests require the benchmark beside e2w/.
 REPO_ROOT = Path(__file__).resolve().parents[4]
 BENCHMARK_ROOT = REPO_ROOT / "physics_iq_for_simple_eval"
+
+
+def setUpModule():
+    if not BENCHMARK_ROOT.is_dir():
+        raise AssertionError(
+            f"benchmark not found at {BENCHMARK_ROOT}; the e2w_core parity tests "
+            "must run inside the monorepo (path computed via parents[4])."
+        )
 
 
 def load_bench_module():
@@ -144,6 +155,12 @@ class OperationParityTest(unittest.TestCase):
         }
         self.assertLessEqual(manifest_ops, declared)
 
+    def test_edit_plan_carries_vectors_not_masks(self):
+        # backs the contract claim: the planner emits vectors, not masks.
+        field_names = {field.name for field in dataclasses.fields(EditPlan)}
+        self.assertEqual(field_names, {"intervention", "region_query", "edit_tokens"})
+        self.assertFalse([name for name in field_names if "mask" in name])
+
 
 class IoContractParityTest(unittest.TestCase):
     run_name = "e2w_core_contract_unittest"
@@ -176,20 +193,9 @@ class IoContractParityTest(unittest.TestCase):
             {"sample_id": "sample_001", "status": "failed", "video": None, "error": "model crashed"},
         )
 
-    def test_benchmark_accepts_directory_written_with_core_contract_names(self):
-        rows = self.bench.load_manifest(validate=True)
+    def _write_run(self, prediction_rows, num_samples):
         videos_dir = self.run_dir / io_contract.PREDICTIONS_VIDEO_DIR
-        videos_dir.mkdir(parents=True)
-
-        prediction_rows = [
-            io_contract.PredictionRow(
-                sample_id=row["sample_id"],
-                status="failed",
-                video=None,
-                error="intentional contract-test failure row",
-            ).to_json()
-            for row in rows
-        ]
+        videos_dir.mkdir(parents=True, exist_ok=True)
         self.bench.write_jsonl(self.run_dir / io_contract.PREDICTIONS_INDEX, prediction_rows)
         self.bench.write_json(
             self.run_dir / io_contract.RUN_META,
@@ -201,15 +207,51 @@ class IoContractParityTest(unittest.TestCase):
                 "manifest_sha256": self.bench.manifest_sha256(),
                 "command": "python -m unittest discover -s tests -v",
                 "created_at": self.bench.utc_now(),
-                "num_samples": len(rows),
+                "num_samples": num_samples,
             },
         )
+
+    def test_benchmark_accepts_directory_written_with_core_contract_names(self):
+        rows = self.bench.load_manifest(validate=True)
+        prediction_rows = [
+            io_contract.PredictionRow(
+                sample_id=row["sample_id"],
+                status="failed",
+                video=None,
+                error="intentional contract-test failure row",
+            ).to_json()
+            for row in rows
+        ]
+        self._write_run(prediction_rows, len(rows))
 
         manifest_rows, predictions, run_meta, run_dir = self.bench.validate_predictions(self.run_name)
         self.assertEqual(len(manifest_rows), len(rows))
         self.assertEqual(len(predictions), len(rows))
         self.assertEqual(run_meta["run_name"], self.run_name)
         self.assertEqual(run_dir, self.run_dir)
+
+    def test_benchmark_rejects_ok_row_with_missing_video(self):
+        # negative parity: an "ok" row whose video file was never written must be
+        # rejected, so the predictions/ shape is locked (not just the happy path).
+        rows = self.bench.load_manifest(validate=True)
+        prediction_rows = []
+        for index, row in enumerate(rows):
+            if index == 0:
+                prediction_rows.append(
+                    io_contract.PredictionRow(
+                        row["sample_id"],
+                        io_contract.STATUS_OK,
+                        f"{io_contract.PREDICTIONS_VIDEO_DIR}/{row['sample_id']}.mp4",
+                    ).to_json()
+                )
+            else:
+                prediction_rows.append(
+                    io_contract.PredictionRow(row["sample_id"], "failed", None, "skip").to_json()
+                )
+        self._write_run(prediction_rows, len(rows))
+
+        with self.assertRaises(self.bench.ValidationError):
+            self.bench.validate_predictions(self.run_name)
 
 
 if __name__ == "__main__":
