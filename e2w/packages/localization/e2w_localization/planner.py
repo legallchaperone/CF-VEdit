@@ -55,7 +55,6 @@ class PlannerConfig:
     dtype: str = "bfloat16"
     frame_interval: int = 1
     max_frames_for_segmentation: int = 21
-    initialize_bypassed_heads: bool = True
     edit_token_slots: int = 4
     renderer_condition_dim: int = 4096
     segmentation_prompt_template: str = "<image>Please segment {target_ref}. [SEG]"
@@ -69,8 +68,8 @@ class CausalPlanner:
     """Wrap stock Sa2VA [SEG] for V0 vanilla direct-mask planning.
 
     Normal trained E2W will use [SEG_DIR]/[SEG_IND]/[EDIT]. In V0 these heads are
-    initialized on the loaded model/tokenizer for shape compatibility, but they
-    are intentionally bypassed: direct = stock [SEG], indirect = empty,
+    composed by overlay.attach_e2w_heads for the full path. Vanilla is strictly
+    the pretrained stock [SEG] path: direct = stock [SEG], indirect = empty,
     edit_tokens = empty placeholder.
     """
 
@@ -78,7 +77,6 @@ class CausalPlanner:
         self.config = config
         self._model = None
         self._processor = None
-        self._heads_initialized = False
         self.last_position_ids_mode = None
 
     def plan(self, video: str | Path | Iterable[Any], instruction: str, *, target_ref: str,
@@ -179,45 +177,9 @@ class CausalPlanner:
         _assert_backbone_loaded(loading_info)  # B1 guard: refuse to run on random weights
         processor = AutoProcessor.from_pretrained(self.config.weights_path, trust_remote_code=True)
 
-        if self.config.initialize_bypassed_heads:
-            self._initialize_bypassed_heads(model, processor)
-
         self._model = model
         self._processor = processor
         return model, processor
-
-    def _initialize_bypassed_heads(self, model: Any, processor: Any) -> None:
-        """Initialize [SEG_DIR]/[SEG_IND]/[EDIT] scaffolding without routing to it.
-
-        This mirrors Sa2VA's [SEG] token registration pattern but keeps V0 output
-        on the pretrained [SEG] path. The edit projection width matches the v0
-        renderer's text-condition width — CogVideoX-Fun-InP's own T5 (d_model=4096;
-        ADR-0007 renderer swap. The old Wan/UMT5 value was also 4096 — numeric
-        coincidence, target space is now CogVideoX T5).
-        """
-        if self._heads_initialized:
-            return
-        import torch
-        from torch import nn
-
-        tokenizer = processor.tokenizer
-        # V0 must preserve the stock [SEG] path exactly. Registering new tokens and
-        # resizing embeddings perturbs generation on this Sa2VA checkpoint under
-        # transformers>=4.51, so query tokens stay NON-VOCAB held nn.Parameter
-        # (overlay.attach_e2w_heads); vocab untouched. Training keeps them non-vocab
-        # (spec §1.2): set those Parameters requires_grad=True + attach LoRA — do NOT
-        # add token registration/embedding-resize.
-        model.seg_dir_idx = tokenizer.convert_tokens_to_ids("[SEG_DIR]")
-        model.seg_ind_idx = tokenizer.convert_tokens_to_ids("[SEG_IND]")
-        model.edit_token_idx = tokenizer.convert_tokens_to_ids("[EDIT]")
-
-        hidden = int(model.config.text_config.hidden_size)
-        slots = int(self.config.edit_token_slots)
-        out_dim = int(self.config.renderer_condition_dim)
-        model.edit_hidden_fcs = nn.Sequential(
-            nn.Linear(hidden, hidden), nn.ReLU(inplace=True), nn.Linear(hidden, slots * out_dim), nn.Dropout(0.0)
-        ).to(next(model.parameters()).device, dtype=next(model.parameters()).dtype)
-        self._heads_initialized = True
 
     def _predict_stock_seg_mask(self, frames: list[Any], target_ref: str):
         import numpy as np
@@ -228,9 +190,10 @@ class CausalPlanner:
         prediction = result.get("prediction", "")
         masks = result.get("prediction_masks") or []
         if not masks:
-            first = frames[0]
-            width, height = first.size
-            return np.zeros((len(frames), height, width), dtype=bool)
+            raise RuntimeError(
+                f"Sa2VA returned no segmentation mask for target_ref={target_ref!r}; "
+                f"prediction={prediction!r}. Refusing to emit an all-keep quadmask."
+            )
 
         direct = np.asarray(masks[0]).astype(bool)
         if direct.ndim != 3:

@@ -11,12 +11,15 @@ import unittest
 from pathlib import Path
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
-if str(PACKAGE_ROOT) not in sys.path:
-    sys.path.insert(0, str(PACKAGE_ROOT))
+E2W_ROOT = PACKAGE_ROOT.parents[1]
+for path in (PACKAGE_ROOT, E2W_ROOT / "packages" / "e2w_core"):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 import torch
 
 from e2w_localization.query_tokens import _build_query_attention_mask, _continuation_offsets
+from e2w_localization.planner import CausalPlanner, PlannerConfig
 
 
 class ContinuationOffsetsTest(unittest.TestCase):
@@ -104,6 +107,21 @@ class BuildQueryAttentionMaskTest(unittest.TestCase):
         bad_padding_mask = torch.ones(2, self.N_PROMPT)
         with self.assertRaises(AssertionError):
             self._mask(prompt_padding_mask=bad_padding_mask)
+
+
+class VanillaPlannerMaskTest(unittest.TestCase):
+    def test_stock_seg_without_mask_fails_loudly(self):
+        class FakeModel:
+            def predict_forward(self, **_kwargs):
+                return {"prediction": "No segmentation token.", "prediction_masks": []}
+
+        planner = CausalPlanner(PlannerConfig(weights_path="unused", device="cpu"))
+        planner._model = FakeModel()
+        planner._processor = object()
+
+        frame = type("Frame", (), {"size": (2, 2)})()
+        with self.assertRaisesRegex(RuntimeError, r"no .*mask.*tennis ball"):
+            planner._predict_stock_seg_mask([frame], "tennis ball")
 
 
 if __name__ == "__main__":
