@@ -1,8 +1,8 @@
 """E2W localization full-path GPU GATE — current ADR-0006 mechanism, real checkpoint.
 
 Validates the CURRENT 4D-mask + tied-RoPE query-token forward on the real Sa2VA
-checkpoint. Supersedes spike_query_tokens.py (which predates ADR-0006 and used a
-plain causal + arange mechanism — historical artifact, not this mechanism). Two layers:
+checkpoint. Supersedes the removed spike_query_tokens.py artifact (which predates
+ADR-0006 and used a plain causal + arange mechanism). Two layers:
   (a) full-path localize_three_layer runs; direct/indirect (T,H,W); edit_tokens
       (4,4096); position_ids_mode == 'get_rope_index+extend' (not arange fallback).
   (b) 4D mask semantics really take effect: blocked edit->seg attention weight == 0
@@ -30,7 +30,7 @@ from pathlib import Path
 import torch
 
 # repo imports
-E2W = Path("/home/cwx/CF-VEdit/e2w")
+E2W = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(E2W / "packages/localization"))
 sys.path.insert(0, str(E2W / "packages/e2w_core"))
 
@@ -44,7 +44,7 @@ from e2w_localization.query_tokens import (
 
 WEIGHTS_CFG = json.loads((E2W / "configs/weights.v0.json").read_text())
 SA2VA = WEIGHTS_CFG["models"]["sa2va_qwen2_5_vl_7b"]["path"]
-VIDEO = "/home/cwx/CF-VEdit/physics_iq_for_simple_eval/videos/source/piq_simple_eval_0018_remove.mp4"
+VIDEO = str(E2W.parent / "physics_iq_for_simple_eval/videos/source/piq_simple_eval_0018_remove.mp4")
 INSTRUCTION = "Remove the tennis ball released above the green kinetic sand."
 NUM_EDIT = 4
 MAX_CONTENT_FRAMES = 5
