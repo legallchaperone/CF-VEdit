@@ -48,8 +48,8 @@ def build_v0_pipeline(config_path: str | Path) -> "E2WPipeline":
     # Renderer = frozen CogVideoX-Fun/VOID pass1 (ADR-0007). Render params
     # (sample_size/num_frames/steps/guidance/negative/out_size) are fixed to
     # reproduce VOID pass1 (verified in M2) and live as VoidRendererConfig
-    # defaults; config only overrides gpu_memory_mode (float8 infer vs bf16
-    # full-load for training) and seed.
+    # defaults; config only overrides gpu_memory_mode (bf16 offload compatibility
+    # mode vs bf16 full-load for training) and seed.
     gen = vanilla.get("generation", {})
     void = weights["cogvideox_fun_void"]
     renderer_cfg = VoidRendererConfig(

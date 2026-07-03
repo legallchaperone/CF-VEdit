@@ -141,11 +141,11 @@ class VoidRendererConfig:
     void_pass1_path: str                 # void_pass1.safetensors
     device: str = "cuda"
     weight_dtype: str = "bfloat16"
-    # "model_cpu_offload_and_qfloat8": inference, saves VRAM (BREAKS GRAD — float8).
+    # "model_cpu_offload_and_qfloat8": compatibility alias; effective bf16 offload.
     # "model_full_load": training, keeps grad to encoder_hidden_states (bf16).
     # "model_cpu_offload": inference, no float8.
     # Stage 2 training HARD-REQUIRES model_full_load (spec §2 Stage 2 / §5.10):
-    # float8 silently breaks the edit-token gradient path with NO error.
+    # offload modes are not valid for the edit-token gradient path.
     gpu_memory_mode: str = "model_cpu_offload_and_qfloat8"
     sample_size: tuple[int, int] = (384, 672)     # (H, W)
     num_frames: int = 85
@@ -200,15 +200,11 @@ class VoidRenderer:
         is the VOID file-convention quadmask ``(T,H,W[,C])`` in {0,63,127,255}.
         ``text_or_embeds`` is a str (vanilla) or ``(Nt,4096)`` tensor (full).
         """
+        import numpy as np
         import torch
         import torch.nn.functional as F
 
         cfg = self.config
-        backend = self._load_backend()
-        pipeline = backend["pipeline"]
-        device = backend["device"]
-        weight_dtype = backend["weight_dtype"]
-
         sample_size = tuple(cfg.sample_size)  # (H, W)
 
         # --- video: area-resize spatial to sample_size, temporal-pad to num_frames
@@ -217,6 +213,20 @@ class VoidRenderer:
             video = torch.as_tensor(video)
         video = video.float()
         b, c, t0, h0, w0 = video.shape
+        quadmask_arr = np.asarray(quadmask_uint8)
+        if quadmask_arr.ndim not in (3, 4):
+            raise ValueError(f"quadmask must be (T,H,W[,C]); got {quadmask_arr.shape}")
+        if quadmask_arr.shape[0] != t0:
+            raise ValueError(
+                f"quadmask frames ({quadmask_arr.shape[0]}) must match video frames ({t0}) "
+                "before temporal padding"
+            )
+
+        backend = self._load_backend()
+        pipeline = backend["pipeline"]
+        device = backend["device"]
+        weight_dtype = backend["weight_dtype"]
+
         if (h0, w0) != sample_size:
             # area-resize spatial dims per-frame (matches get_video_mask_input)
             v = video.permute(0, 2, 1, 3, 4).reshape(b * t0, c, h0, w0)
@@ -225,7 +235,7 @@ class VoidRenderer:
         video = _temporal_pad(video, target_length=cfg.num_frames)
 
         # --- mask: file-convention quadmask -> pipeline mask, temporal-pad
-        mask_video = void_quadmask_to_pipeline_mask(quadmask_uint8, sample_size=sample_size)
+        mask_video = void_quadmask_to_pipeline_mask(quadmask_arr, sample_size=sample_size)
         mask_video = _temporal_pad(mask_video, target_length=cfg.num_frames)
 
         video = video.to(device=device, dtype=weight_dtype)
@@ -373,16 +383,14 @@ class VoidRenderer:
         from videox_fun.models import (AutoencoderKLCogVideoX,
                                         CogVideoXTransformer3DModel)
         from videox_fun.pipeline import CogVideoXFunInpaintPipeline
-        from videox_fun.utils.fp8_optimization import convert_weight_dtype_wrapper
 
         weight_dtype = torch.bfloat16 if cfg.weight_dtype == "bfloat16" else torch.float16
         device = cfg.device
-        qf8 = cfg.gpu_memory_mode == "model_cpu_offload_and_qfloat8"
         base = str(Path(cfg.base_path).resolve())
 
         transformer = CogVideoXTransformer3DModel.from_pretrained(
             base, subfolder="transformer", low_cpu_mem_usage=True,
-            torch_dtype=(torch.float8_e4m3fn if qf8 else weight_dtype),
+            torch_dtype=weight_dtype,
             use_vae_mask=cfg.use_vae_mask, stack_mask=cfg.stack_mask,
         ).to(weight_dtype)
 
@@ -415,7 +423,13 @@ class VoidRenderer:
 
         mode = cfg.gpu_memory_mode
         if mode == "model_cpu_offload_and_qfloat8":
-            convert_weight_dtype_wrapper(transformer, weight_dtype)
+            import warnings
+            warnings.warn(
+                "gpu_memory_mode=model_cpu_offload_and_qfloat8 is a compatibility no-op "
+                "in E2W: running effective bf16 model_cpu_offload for numerical parity "
+                "with the VOID baseline; no float8 VRAM saving is claimed.",
+                RuntimeWarning,
+            )
             pipeline.enable_model_cpu_offload(device=device)
         elif mode == "model_cpu_offload":
             pipeline.enable_model_cpu_offload(device=device)
