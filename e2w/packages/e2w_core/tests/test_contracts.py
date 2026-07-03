@@ -111,7 +111,7 @@ class SeamPayloadContractTest(unittest.TestCase):
 class EditTokenValidationTest(unittest.TestCase):
     """Guards the full-path failure mode: edit_tokens missing/malformed must raise,
     never silently fall back to text conditioning (the adapter + render worker both
-    call this before reaching VACE)."""
+    call this before reaching the renderer)."""
 
     def test_valid_shape_passes(self):
         self.assertEqual(validate_edit_tokens_shape((4, EDIT_TOKEN_DIM), slots=4), (4, 4096))

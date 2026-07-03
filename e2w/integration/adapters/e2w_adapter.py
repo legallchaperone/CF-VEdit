@@ -59,17 +59,21 @@ def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     path.write_text("".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in rows))
 
 
+def append_jsonl(path: Path, row: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+
+
 def manifest_sha256(manifest: Path) -> str:
     return hashlib.sha256(manifest.read_bytes()).hexdigest()
 
 
-def render_worker(job_path: Path) -> int:
+def _render_one_job(pipeline: Any, job: dict[str, Any]) -> PredictionRow:
     import numpy as np
     from e2w_core.masks import ThreeLayerMask
     from e2w_core.plan import validate_edit_tokens_shape
 
-    job = json.loads(job_path.read_text())
-    pipeline = build_v0_pipeline(job["config"])
     arrays = np.load(job["mask_npz"], allow_pickle=False)
     mask = ThreeLayerMask(direct=arrays["direct"].astype(bool), indirect=arrays["indirect"].astype(bool))
     source = pipeline.abductor.invert(job["source_path"])
@@ -88,13 +92,48 @@ def render_worker(job_path: Path) -> int:
     else:
         edit_condition = job["instruction"]
     pipeline.renderer.render(source, edit_condition, mask, out_path=job["out_path"])
-    return 0
+    return PredictionRow(sample_id=job["sample_id"], video=job["video"], status=STATUS_OK, error=None)
+
+
+def render_worker(job_path: Path) -> int:
+    payload = json.loads(job_path.read_text())
+    if "jobs" in payload:
+        jobs = payload["jobs"]
+        config = payload["config"]
+        results_path = Path(payload["results_path"])
+        continue_on_error = bool(payload.get("continue_on_error", False))
+    else:
+        jobs = [payload]
+        config = payload["config"]
+        results_path = Path(payload.get("results_path", job_path.with_suffix(".results.jsonl")))
+        continue_on_error = bool(payload.get("continue_on_error", False))
+
+    pipeline = build_v0_pipeline(config)
+    ok = True
+    for job in jobs:
+        try:
+            pred = _render_one_job(pipeline, job)
+        except Exception as exc:  # noqa: BLE001 - persisted for benchmark accounting.
+            traceback.print_exc()
+            pred = PredictionRow(
+                sample_id=job.get("sample_id", Path(job.get("out_path", "unknown")).stem),
+                video=None,
+                status="failed",
+                error=f"render {type(exc).__name__}: {exc}",
+            )
+            ok = False
+            append_jsonl(results_path, pred.to_json())
+            if not continue_on_error:
+                return 1
+            continue
+        append_jsonl(results_path, pred.to_json())
+    return 0 if ok or continue_on_error else 1
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run E2W V0 vanilla benchmark adapter")
     parser.add_argument("--run-name", default="e2w_vanilla_v0")
-    parser.add_argument("--config", default=str(E2W_ROOT / "configs" / "vanilla.v0.json"))
+    parser.add_argument("--config", default=None)
     parser.add_argument("--benchmark-root", default=str(REPO_ROOT / "physics_iq_for_simple_eval"))
     parser.add_argument("--sample-id", action="append", help="Run only selected sample id(s); repeatable")
     parser.add_argument("--sample-limit", type=int, help="Run only the first N manifest rows")
@@ -112,6 +151,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.vanilla == args.full:
         parser.error("pass exactly one of --vanilla (bypass) or --full (untrained A.1)")
     vanilla = args.vanilla
+    if args.config is None:
+        name = "vanilla.v0.json" if vanilla else "full.v0.json"
+        args.config = str(E2W_ROOT / "configs" / name)
+    config_path = Path(args.config).resolve()
+    version = json.loads(config_path.read_text()).get("version", "")
+    if ("vanilla" in version) != vanilla:
+        mode = "vanilla" if vanilla else "full"
+        parser.error(f"--{mode} requires a matching config version, got {version!r} from {config_path}")
 
     benchmark_root = Path(args.benchmark_root).resolve()
     manifest_path = benchmark_root / "manifest.jsonl"
@@ -144,31 +191,32 @@ def main(argv: list[str] | None = None) -> int:
             "benchmark_version": BENCHMARK_VERSION,
             "manifest_sha256": manifest_sha256(manifest_path),
             "model_name": (
-                "E2W V0 vanilla: Sa2VA [SEG] + Wan2.2 VACE-Fun with latent paste-back"
+                "E2W V0 vanilla: Sa2VA [SEG] + frozen CogVideoX-Fun/VOID pass1 "
+                "(quadmask channel-concat)"
                 if vanilla else
                 "E2W V0 full (untrained A.1): query-token [SEG_DIR]/[SEG_IND]/[EDIT] "
-                "three-layer mask + edit_tokens -> Wan2.2 VACE-Fun, noised feathered paste-back"
+                "three-layer mask + edit_tokens hard-replacing T5 -> frozen CogVideoX-Fun/VOID pass1"
             ),
             "model_version": "v0-vanilla-eval" if vanilla else "v0-full-untrained-eval",
             "mode": "vanilla" if vanilla else "full-untrained",
             "created_at": utc_now(),
             "num_samples": len(manifest_rows),
             "command": " ".join(sys.argv),
-            "config": str(Path(args.config).resolve()),
+            "config": str(config_path),
             "adapter": str(Path(__file__).resolve()),
             "status_policy": "continue-on-error" if args.continue_on_error else "abort-on-error",
         },
     )
 
-    pipeline = build_v0_pipeline(args.config)
+    pipeline = build_v0_pipeline(config_path)
     slots = int(pipeline.planner.config.edit_token_slots)
     prediction_rows: list[dict[str, Any]] = []
     planned: dict[str, tuple[dict[str, Any], str, str]] = {}
     failures: dict[str, PredictionRow] = {}
     position_ids_modes: dict[str, Any] = {}
 
-    # Stage 1: Sa2VA localization only. Keep Wan/VACE unloaded, then release Sa2VA
-    # before the 14B renderer enters GPU memory.
+    # Stage 1: Sa2VA localization only. Keep the renderer unloaded, then release
+    # Sa2VA before the CogVideoX-Fun/VOID backend enters GPU memory.
     for row in manifest_rows:
         sample_id = row["sample_id"]
         video_name = f"{sample_id}.mp4"
@@ -193,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
             save_kwargs = dict(direct=mask.direct.astype(bool), indirect=mask.indirect.astype(bool))
             if not vanilla:
                 # Fail loudly: a full run with no edit_tokens is a broken planner, not
-                # a renderable sample. Validate shape before it reaches VACE.
+                # a renderable sample. Validate shape before it reaches the renderer.
                 if plan.edit_tokens is None:
                     raise RuntimeError(f"full mode planner returned no edit_tokens for {sample_id}")
                 edit_np = plan.edit_tokens.float().cpu().numpy()
@@ -228,54 +276,80 @@ def main(argv: list[str] | None = None) -> int:
         meta["position_ids_modes"] = position_ids_modes
         write_json(meta_path, meta)
 
-    # Stage 2: Wan/VACE rendering. Sa2VA is no longer resident.
+    # Stage 2: CogVideoX-Fun/VOID rendering. Sa2VA is no longer resident.
+    render_jobs: list[dict[str, Any]] = []
     for row in manifest_rows:
         sample_id = row["sample_id"]
         video_name = f"{sample_id}.mp4"
         out_rel = f"{PREDICTIONS_VIDEO_DIR}/{video_name}"
         out_path = run_dir / out_rel
         if sample_id in failures:
-            prediction_rows.append(failures[sample_id].to_json())
-            write_jsonl(run_dir / PREDICTIONS_INDEX, prediction_rows)
             continue
 
         instruction = row["instruction"]
-        try:
-            print(f"[e2w-adapter] render {sample_id}: {instruction}", flush=True)
-            _row, source_path_str, mask_path_str = planned[sample_id]
-            job_path = jobs_dir / f"{sample_id}.json"
-            write_json(
-                job_path,
-                {
-                    "config": str(Path(args.config).resolve()),
-                    "source_path": source_path_str,
-                    "mask_npz": mask_path_str,
-                    "instruction": instruction,
-                    "out_path": str(out_path),
-                    "vanilla": vanilla,
-                    "edit_slots": slots,
-                },
+        print(f"[e2w-adapter] queue render {sample_id}: {instruction}", flush=True)
+        _row, source_path_str, mask_path_str = planned[sample_id]
+        job = {
+            "config": str(config_path),
+            "sample_id": sample_id,
+            "source_path": source_path_str,
+            "mask_npz": mask_path_str,
+            "instruction": instruction,
+            "out_path": str(out_path),
+            "video": out_rel,
+            "vanilla": vanilla,
+            "edit_slots": slots,
+        }
+        write_json(jobs_dir / f"{sample_id}.json", job)
+        render_jobs.append(job)
+
+    render_results_path = jobs_dir / "render_results.jsonl"
+    render_worker_failed = False
+    if render_jobs:
+        batch_path = jobs_dir / "batch.json"
+        write_json(
+            batch_path,
+            {
+                "config": str(config_path),
+                "results_path": str(render_results_path),
+                "continue_on_error": args.continue_on_error,
+                "jobs": render_jobs,
+            },
+        )
+        env = os.environ.copy()
+        env.setdefault("TOKENIZERS_PARALLELISM", "false")
+        proc = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), "--render-worker-json", str(batch_path)],
+            cwd=str(E2W_ROOT),
+            env=env,
+        )
+        render_worker_failed = proc.returncode != 0
+
+    rendered = {}
+    if render_results_path.exists():
+        rendered = {row["sample_id"]: row for row in read_jsonl(render_results_path)}
+
+    for row in manifest_rows:
+        sample_id = row["sample_id"]
+        if sample_id in failures:
+            pred = failures[sample_id]
+        elif sample_id in rendered:
+            prediction_rows.append(rendered[sample_id])
+            write_jsonl(run_dir / PREDICTIONS_INDEX, prediction_rows)
+            continue
+        else:
+            pred = PredictionRow(
+                sample_id=sample_id,
+                video=None,
+                status="failed",
+                error="render missing result row from worker",
             )
-            env = os.environ.copy()
-            env.setdefault("TOKENIZERS_PARALLELISM", "false")
-            proc = subprocess.run(
-                [sys.executable, str(Path(__file__).resolve()), "--render-worker-json", str(job_path)],
-                cwd=str(E2W_ROOT),
-                env=env,
-            )
-            if proc.returncode != 0:
-                raise RuntimeError(f"render worker exited with code {proc.returncode}")
-            pred = PredictionRow(sample_id=sample_id, video=out_rel, status=STATUS_OK, error=None)
-        except Exception as exc:  # noqa: BLE001 - persisted for benchmark failure accounting.
-            err = f"render {type(exc).__name__}: {exc}"
-            traceback.print_exc()
-            pred = PredictionRow(sample_id=sample_id, video=None, status="failed", error=err)
-            if not args.continue_on_error:
-                prediction_rows.append(pred.to_json())
-                write_jsonl(run_dir / PREDICTIONS_INDEX, prediction_rows)
-                return 1
+            render_worker_failed = True
         prediction_rows.append(pred.to_json())
         write_jsonl(run_dir / PREDICTIONS_INDEX, prediction_rows)
+
+    if render_worker_failed and not args.continue_on_error:
+        return 1
 
     return 0
 
