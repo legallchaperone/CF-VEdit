@@ -1,15 +1,27 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+This file provides guidance to Codex (and other coding agents) when working with code in this repository.
 
 ## What this repo is
 
 Two layers live here, and they are at very different maturity:
 
-1. **Design docs at the root** (`*.md`, written in Chinese) — the "proposal-as-truth" for **CF-VEdit / E2W**, a counterfactual video-editing system. These are the canonical spec; the monorepo they describe (`e2w/` with `e2w_core`, `localization`, `generation`, `data_engine`, `integration`) is **not built yet**.
-2. **`physics_iq_for_simple_eval/`** — the only implemented code. It is the **P0 benchmark** (`cf_vedit_bench`): 12 Physics-IQ clips packaged as a pluggable, file-based evaluation suite for *any* video-editing model.
+1. **Design docs at the root** (`*.md`, written in Chinese) — the "proposal-as-truth" for **CF-VEdit / E2W**, a counterfactual video-editing system. The monorepo they describe (`e2w/` with `e2w_core`, `localization`, `generation`, `data_engine`, `integration`) is **scaffolded** — 5 packages with code, tests, and ADRs 0001–0007. Current status: `e2w/README.md`; decisions: `e2w/docs/adr/`; spec-vs-implemented: `e2w/docs/TRACEABILITY.md`.
+2. **`physics_iq_for_simple_eval/`** — mature, fully-working code. The **P0 benchmark** (`cf_vedit_bench`): 12 Physics-IQ clips packaged as a pluggable, file-based evaluation suite for *any* video-editing model.
 
-The deliberate sequencing (`CF-VEdit-Repo-Design.md` §5): **build the ruler (benchmark) before the machine (model)**, so the model is always measured against a spec it cannot quietly drift from. When asked to "implement the model," understand it means standing up the monorepo described in the design docs — that work has not started.
+The deliberate sequencing (`CF-VEdit-Repo-Design.md` §5): **build the ruler (benchmark) before the machine (model)**, so the model is always measured against a spec it cannot quietly drift from. The model half is now underway (v0 remove-only, ADR-0007) — check `e2w/README.md` and the ADRs before assuming what's built.
+
+## Guardrail — don't casually change existing rules
+
+This repo has real invariants enforced by code/tests, not just prose. Before editing near one of these, stop and confirm with the user rather than just "fixing" it — a failing check usually means your change is wrong, not the check:
+
+- `physics_iq_for_simple_eval/tests/test_cf_vedit_benchmark.py` — spec-as-test for the benchmark.
+- Benchmark read-only assets (`manifest.jsonl`, `contracts/`, `videos/source/`, `annotations/`, `judges/`, `schemas/`) — a run must never write here; see B2 below.
+- `bench.py`'s offline-baseline branch in `cmd_score` (copy_source/free_regen) — keeps tests runnable without network/API key.
+- e2w's import-linter graph (`e2w/pyproject.toml` `[tool.importlinter]`) — `e2w_core` has no deps; other packages must not depend on each other.
+- Anything already covered by an ADR in `e2w/docs/adr/` — a deviation needs a new ADR, not a silent edit.
+
+If unsure whether something is load-bearing, ask instead of assuming it's dead weight.
 
 ### The design docs (read these before changing the benchmark's shape)
 
@@ -83,6 +95,10 @@ Deterministic baseline runs (`copy_source`/`free_regen`, detected via `baseline_
 
 `validate <run>` rejects a run whose `run_meta.json` is missing any of `RUN_META_REQUIRED`, whose `benchmark_version` ≠ `BENCHMARK_VERSION` (currently `0.1.0`, in `bench.py`), or whose `manifest_sha256` ≠ the live manifest hash. Editing `manifest.jsonl` therefore invalidates every prior run — regenerate baselines after any manifest change.
 
+## Working in `e2w/`
+
+Scaffolded monorepo. Read `e2w/AGENTS.md` (the constitution — five boundaries + change discipline) and `e2w/README.md` first. Status drifts fast — check `e2w/docs/adr/` before assuming what's built. The five boundaries B1–B5 are import-linter/CI enforced; don't route around them.
+
 ## Boundaries & anti-drift (when extending toward the full monorepo)
 
 The design docs encode five hard boundaries (`CF-VEdit-Repo-Design.md` §2) meant to become CI-enforced (import-linter, schema checks). The two already live in the benchmark:
@@ -90,4 +106,4 @@ The design docs encode five hard boundaries (`CF-VEdit-Repo-Design.md` §2) mean
 - **B1 — benchmark ↔ model:** the benchmark consumes the `predictions/` directory and must never import model code.
 - **B2 — data assets ↔ run outputs:** the read-only/produced split above.
 
-Others (B3 localization↔generation, B4 vendored upstream untouched, B5 train/eval source disjoint) apply once the model packages exist. The intended discipline: **change `docs/proposal/` before changing code; any deviation gets an ADR; reserved scope** (pair examples `pair_id`, edit breadth `attribute`/`force_event`) **stays as placeholder fields, not half-built features.**
+Others (B3 localization↔generation, B4 vendored upstream untouched, B5 train/eval source disjoint) apply as the model packages mature. The intended discipline: **change `docs/proposal/` before changing code; any deviation gets an ADR; reserved scope** (pair examples `pair_id`, edit breadth `attribute`/`force_event`) **stays as placeholder fields, not half-built features.**
