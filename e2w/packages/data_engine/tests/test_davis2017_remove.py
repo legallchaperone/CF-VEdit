@@ -23,6 +23,13 @@ class Davis2017RemoveTest(unittest.TestCase):
 
             self.assertEqual(davis.object_colors_bgr(path), [(0, 0, 128), (0, 128, 0)])
 
+    def test_palette_reader_accepts_one_bit_palette_png(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ann.png"
+            _write_palette_png(path, np.array([[0, 1, 0, 1]], dtype=np.uint8), bits=1)
+
+            self.assertEqual(davis.object_colors_bgr(path), [(0, 0, 128)])
+
     def test_quadmask_direct_wins_and_uses_canonical_values(self):
         direct = np.array([[[False, True], [False, True]]])
         indirect = np.array([[[False, False], [True, True]]])
@@ -150,6 +157,119 @@ class Davis2017RemoveTest(unittest.TestCase):
             quadmask = np.load(out / person["quadmask_npy"], allow_pickle=False)
             self.assertEqual(int(quadmask[0, 7, 10]), 255)
 
+    def test_vlm_namer_makes_multi_object_sequence_clean_without_manual_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            davis_root = Path(tmp) / "DAVIS"
+            out = Path(tmp) / "out"
+            stage2, stage3a = _write_stage_scripts(Path(tmp), mode="clean")
+            namer = _write_namer_script(Path(tmp), mode="names")
+            _write_synthetic_davis(davis_root, objects=2)
+
+            code = davis.main([
+                "build",
+                "--davis-root", str(davis_root),
+                "--split", "train",
+                "--out-root", str(out),
+                "--python-bin", sys.executable,
+                "--name-objects-script", str(namer),
+                "--stage2-script", str(stage2),
+                "--stage3a-script", str(stage3a),
+                "--limit", "1",
+            ])
+
+            self.assertEqual(code, 0)
+            manifest = _read_jsonl(out / "manifest.jsonl")
+            self.assertEqual([row["target_ref"] for row in manifest], ["person", "bike"])
+            self.assertTrue(all(row["label_quality"]["target_ref"] == "vlm" for row in manifest))
+            self.assertTrue((out / "void_reasoner" / "object_names.vlm.json").exists())
+
+    def test_vlm_namer_duplicate_names_quarantine_members(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            davis_root = Path(tmp) / "DAVIS"
+            out = Path(tmp) / "out"
+            stage2, stage3a = _write_stage_scripts(Path(tmp), mode="clean")
+            namer = _write_namer_script(Path(tmp), mode="duplicates")
+            _write_synthetic_davis(davis_root, objects=2)
+
+            code = davis.main([
+                "build",
+                "--davis-root", str(davis_root),
+                "--split", "train",
+                "--out-root", str(out),
+                "--python-bin", sys.executable,
+                "--name-objects-script", str(namer),
+                "--stage2-script", str(stage2),
+                "--stage3a-script", str(stage3a),
+                "--limit", "1",
+            ])
+
+            self.assertEqual(code, 0)
+            self.assertEqual(_read_jsonl(out / "manifest.jsonl"), [])
+            quarantine = _read_jsonl(out / "quarantine.jsonl")
+            self.assertEqual(len(quarantine), 2)
+            self.assertTrue(all("unresolvable_target_ref" in row["quarantine_reasons"] for row in quarantine))
+
+    def test_vlm_name_cache_skips_namer_script(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            davis_root = Path(tmp) / "DAVIS"
+            out = Path(tmp) / "out"
+            stage2, stage3a = _write_stage_scripts(Path(tmp), mode="clean")
+            namer = _write_namer_script(Path(tmp), mode="fail")
+            _write_synthetic_davis(davis_root, objects=2)
+            (out / "void_reasoner").mkdir(parents=True)
+            (out / "void_reasoner" / "object_names.vlm.json").write_text(
+                json.dumps({"toy": {"1": "person", "2": "bike"}}),
+                encoding="utf-8",
+            )
+
+            code = davis.main([
+                "build",
+                "--davis-root", str(davis_root),
+                "--split", "train",
+                "--out-root", str(out),
+                "--python-bin", sys.executable,
+                "--name-objects-script", str(namer),
+                "--stage2-script", str(stage2),
+                "--stage3a-script", str(stage3a),
+                "--limit", "1",
+            ])
+
+            self.assertEqual(code, 0)
+            self.assertEqual([row["target_ref"] for row in _read_jsonl(out / "manifest.jsonl")], ["person", "bike"])
+
+    def test_manual_name_beats_vlm_cache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            davis_root = Path(tmp) / "DAVIS"
+            out = Path(tmp) / "out"
+            names = Path(tmp) / "names.json"
+            stage2, stage3a = _write_stage_scripts(Path(tmp), mode="clean")
+            namer = _write_namer_script(Path(tmp), mode="fail")
+            _write_synthetic_davis(davis_root, objects=2)
+            names.write_text(json.dumps({"toy": ["rider", "cycle"]}), encoding="utf-8")
+            (out / "void_reasoner").mkdir(parents=True)
+            (out / "void_reasoner" / "object_names.vlm.json").write_text(
+                json.dumps({"toy": {"1": "person", "2": "bike"}}),
+                encoding="utf-8",
+            )
+
+            code = davis.main([
+                "build",
+                "--davis-root", str(davis_root),
+                "--split", "train",
+                "--out-root", str(out),
+                "--object-names-json", str(names),
+                "--python-bin", sys.executable,
+                "--name-objects-script", str(namer),
+                "--stage2-script", str(stage2),
+                "--stage3a-script", str(stage3a),
+                "--limit", "1",
+            ])
+
+            self.assertEqual(code, 0)
+            manifest = _read_jsonl(out / "manifest.jsonl")
+            self.assertEqual([row["target_ref"] for row in manifest], ["rider", "cycle"])
+            self.assertTrue(all(row["label_quality"]["target_ref"] == "manual" for row in manifest))
+
     def test_grey_mask_frame_mismatch_quarantines_instead_of_empty_weak_label(self):
         with tempfile.TemporaryDirectory() as tmp:
             davis_root = Path(tmp) / "DAVIS"
@@ -256,14 +376,15 @@ def _write_synthetic_davis(root: Path, *, objects: int, include_void: bool = Fal
     writer.release()
 
 
-def _write_palette_png(path: Path, arr: np.ndarray) -> None:
+def _write_palette_png(path: Path, arr: np.ndarray, *, bits: int | None = None) -> None:
     image = Image.fromarray(arr.astype(np.uint8), mode="P")
     palette = [0, 0, 0] * 256
     palette[1 * 3:1 * 3 + 3] = [128, 0, 0]
     palette[2 * 3:2 * 3 + 3] = [0, 128, 0]
     palette[255 * 3:255 * 3 + 3] = [255, 255, 255]
     image.putpalette(palette)
-    image.save(path)
+    save_kwargs = {"bits": bits} if bits is not None else {}
+    image.save(path, **save_kwargs)
 
 
 def _write_stage_scripts(root: Path, *, mode: str) -> tuple[Path, Path]:
@@ -311,6 +432,34 @@ for row in json.loads(config.read_text()):
     writer.release()
 """, encoding="utf-8")
     return stage2, stage3a
+
+
+def _write_namer_script(root: Path, *, mode: str) -> Path:
+    path = root / f"namer_{mode}.py"
+    path.write_text(f"""
+import json
+import sys
+from pathlib import Path
+
+if {mode!r} == "fail":
+    raise SystemExit(42)
+
+config = Path(sys.argv[sys.argv.index("--config") + 1])
+out_json = Path(sys.argv[sys.argv.index("--out-json") + 1])
+cache = json.loads(out_json.read_text()) if out_json.exists() else {{}}
+for row in json.loads(config.read_text()):
+    if {mode!r} == "duplicates":
+        cache[row["sequence"]] = {{str(obj["object_id"]): "dog" for obj in row["objects"]}}
+    else:
+        names = ["person", "bike", "third object"]
+        cache[row["sequence"]] = {{
+            str(obj["object_id"]): names[idx]
+            for idx, obj in enumerate(row["objects"])
+        }}
+out_json.parent.mkdir(parents=True, exist_ok=True)
+out_json.write_text(json.dumps(cache))
+""", encoding="utf-8")
+    return path
 
 
 def _read_jsonl(path: Path) -> list[dict]:

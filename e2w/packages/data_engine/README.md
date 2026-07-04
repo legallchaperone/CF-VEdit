@@ -18,6 +18,7 @@ Data flow:
 ```
 DAVIS JPEGImages/480p/<sequence>/*.jpg   -> frames_dir training input
 DAVIS Annotations/480p/<sequence>/*.png  -> direct_mask_npy
+name_objects_vlm.py                      -> target_ref for multi-object rows
 VOID stage2 VLM analysis                 -> post_removal_description + integral/affected nouns
 VOID stage3a_v2 grey masks               -> indirect_mask_npy
 direct + indirect                        -> quadmask_npy
@@ -30,14 +31,18 @@ Label provenance:
 - `indirect`: `void_vlm_weak` only when `grey_mask.mp4` was actually read;
   `void_vlm_none` means stage2 listed no affected objects; missing/mismatched
   grey masks quarantine the row.
+- `target_ref`: `manual`, `vlm`, `sequence_slug`, or `merged`.
 - `text_condition`: `void_bg`, stage2's scene description after removal.
 
 `source_video` is a lossy preview for VOID scripts and human review. Stage 0
 training must consume `frames_dir` JPEGs, not `source_video`.
 
-For multi-object sequences, pass explicit names with `--object-names-json`.
-Unnamed multi-object rows quarantine as `unresolvable_target_ref` rather than
-emitting "remove the highlighted object".
+For multi-object sequences, `name_objects_vlm.py` names all objects in the
+sequence in one VLM call, writes `void_reasoner/object_names.vlm.json`, and
+skips cached sequences on rerun unless `--overwrite-vlm`. Manual
+`--object-names-json` entries take precedence; invalid or duplicate names
+quarantine as `unresolvable_target_ref` rather than emitting "remove the
+highlighted object".
 
 ## Future paired simulator
 
@@ -69,6 +74,7 @@ bit-identical → exact invariant labels and the cleanest invariant-loss signal.
 ```
 data_engine/
   e2w_data_engine/davis2017_remove.py  DAVIS2017 -> Stage 0/1 rows
+  e2w_data_engine/name_objects_vlm.py  sequence-level object naming
   e2w_data_engine/                     future sim data code
   tests/
 ```

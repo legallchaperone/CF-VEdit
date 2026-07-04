@@ -30,12 +30,16 @@ local builder:
   description, integral belongings, and affected-object nouns.
 - VOID stage3a uses `stage3a_generate_grey_masks_v2.py`, not the older static
   first-frame script.
+- Multi-object target names come from `name_objects_vlm.py`, one VLM call per
+  sequence over red-overlay object images. Results cache in
+  `void_reasoner/object_names.vlm.json`; manual names override VLM names.
 - The instruction-mask invariant is mandatory: the 0/remove mask must be
   exactly the referent of the instruction. "remove the bike" uses the bike
   mask; "remove the person and bike" uses the union of both masks.
-- Multi-object rows need explicit per-object names. If a name is missing or
-  ambiguous, the row quarantines as `unresolvable_target_ref`; the builder never
-  emits "highlighted object" as a clean training target.
+- If a name is missing, ambiguous, longer than four words, or duplicated within
+  the sequence after normalization, the row quarantines as
+  `unresolvable_target_ref`; the builder never emits "highlighted object" as a
+  clean training target.
 - If stage2 marks another DAVIS object as an integral belonging, the builder
   emits a merged row for the union and quarantines the individual member rows.
   If the integral noun has no matching DAVIS object, the row quarantines.
@@ -51,6 +55,9 @@ re-encode kept for VOID scripts and human review only.
 - The training labels stay aligned with the text query used by `[SEG_DIR]` and
   `[EDIT]`; contradictory "same video, same generic instruction, different
   masks" rows are quarantined.
+- Single-object sequence-slug names and VLM/manual names are recorded in
+  `label_quality.target_ref`, so odd slugs can be found and overridden without
+  authoring a full names file.
 - The builder remains a thin adapter around DAVIS + VOID. It records audit data
   for VLM affected nouns that disappear after VOID's proximity-filtered grey
   mask, but it does not fork VOID's stage3a implementation.

@@ -10,14 +10,13 @@ import argparse
 import json
 import re
 import shutil
-import struct
 import subprocess
-import zlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 DEFAULT_PYTHON = "/data/cwx/conda/envs/edit2world-phase1-real/bin/python"
+DEFAULT_NAME_OBJECTS = str(Path(__file__).resolve().with_name("name_objects_vlm.py"))
 DEFAULT_STAGE2 = "/data/cwx/void-model/VLM-MASK-REASONER/stage2_vlm_analysis_cf.py"
 DEFAULT_STAGE3A = "/data/cwx/void-model/VLM-MASK-REASONER/stage3a_generate_grey_masks_v2.py"
 CANONICAL_QUADMASK_VALUES = {0, 127, 255}
@@ -39,7 +38,9 @@ class SampleWork:
     obj_idx: int
     object_ids: tuple[int, ...]
     object_color_bgr: tuple[int, int, int]
+    first_appears_frame: int
     target_ref: str
+    target_ref_source: str
     instruction: str
     direct_mask_path: Path
     workdir: Path
@@ -110,7 +111,6 @@ def build(args: argparse.Namespace) -> int:
 
     samples: list[SampleWork] = []
     samples_by_sequence: dict[str, list[SampleWork]] = {}
-    forced_quarantine: dict[str, set[str]] = {}
 
     for sequence in sequences:
         ann_paths = sorted((davis_root / "Annotations" / "480p" / sequence).glob("*.png"))
@@ -137,13 +137,18 @@ def build(args: argparse.Namespace) -> int:
                 davis_object=obj,
                 ann_paths=ann_paths,
                 frame_paths=frame_paths,
-                object_names=object_names,
             )
             samples.append(sample)
             sequence_samples.append(sample)
-            if _bad_target_ref(sample.target_ref):
-                forced_quarantine.setdefault(sample.sample_id, set()).add("unresolvable_target_ref")
         samples_by_sequence[sequence] = sequence_samples
+
+    vlm_names = {} if args.skip_vlm else _run_object_naming(args, out_root, samples_by_sequence, object_names)
+    samples_by_sequence, forced_quarantine = _resolve_sample_targets(
+        samples_by_sequence,
+        object_names=object_names,
+        vlm_names=vlm_names,
+    )
+    samples = [sample for sequence_samples in samples_by_sequence.values() for sample in sequence_samples]
 
     _write_json(out_root / "void_reasoner" / "config.json", [_config_row(s, out_root) for s in samples if s.target_ref])
 
@@ -197,6 +202,7 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--skip-vlm", action="store_true")
     b.add_argument("--overwrite-vlm", action="store_true")
     b.add_argument("--object-names-json")
+    b.add_argument("--name-objects-script", default=DEFAULT_NAME_OBJECTS)
     b.add_argument("--python-bin", default=DEFAULT_PYTHON)
     b.add_argument("--stage2-script", default=DEFAULT_STAGE2)
     b.add_argument("--stage3a-script", default=DEFAULT_STAGE3A)
@@ -227,13 +233,10 @@ def _prepare_sample(
     davis_object: DavisObject,
     ann_paths: list[Path],
     frame_paths: list[Path],
-    object_names: dict[str, Any],
 ) -> SampleWork:
     import numpy as np
 
     sample_id = f"davis2017_{split}_{sequence}_obj{davis_object.obj_idx:03d}"
-    target_ref = _target_ref(sequence, davis_object, object_count, object_names)
-    instruction = f"remove the {target_ref}" if target_ref else ""
     direct_stack = _direct_stack_for_object(ann_paths, davis_object.object_id)
 
     direct_path = out_root / "masks" / f"{sequence}_obj{davis_object.obj_idx:03d}_direct.npy"
@@ -249,9 +252,11 @@ def _prepare_sample(
         frame_paths=frame_paths,
         metadata={
             "sample_id": sample_id,
+            "obj_idx": davis_object.obj_idx,
             "object_ids": [davis_object.object_id],
-            "target_ref": target_ref,
-            "instruction": instruction,
+            "target_ref": "",
+            "target_ref_source": "",
+            "instruction": "",
             "first_appears_frame": davis_object.first_appears_frame,
         },
     )
@@ -262,8 +267,10 @@ def _prepare_sample(
         obj_idx=davis_object.obj_idx,
         object_ids=(davis_object.object_id,),
         object_color_bgr=davis_object.object_color_bgr,
-        target_ref=target_ref,
-        instruction=instruction,
+        first_appears_frame=davis_object.first_appears_frame,
+        target_ref="",
+        target_ref_source="",
+        instruction="",
         direct_mask_path=direct_path,
         workdir=workdir,
     )
@@ -309,8 +316,10 @@ def _prepare_merged_sample(
         frame_paths=frame_paths,
         metadata={
             "sample_id": sample_id,
+            "obj_idx": obj_idx,
             "object_ids": list(object_ids),
             "target_ref": target_ref,
+            "target_ref_source": "merged",
             "instruction": instruction,
             "first_appears_frame": first_appears_frame,
             "merged_from": [first.sample_id, second.sample_id],
@@ -322,7 +331,9 @@ def _prepare_merged_sample(
         obj_idx=obj_idx,
         object_ids=object_ids,
         object_color_bgr=first.object_color_bgr,
+        first_appears_frame=first_appears_frame,
         target_ref=target_ref,
+        target_ref_source="merged",
         instruction=instruction,
         direct_mask_path=direct_path,
         workdir=workdir,
@@ -351,8 +362,9 @@ def _finalize_sample(
         analysis_exists=analysis_path.exists(),
         analysis=analysis,
     )
-    indirect_path = out_root / "masks" / f"{sample.sample_id}_indirect.npy"
-    quadmask_path = out_root / "quadmasks" / f"{sample.sample_id}_quadmask.npy"
+    mask_stem = _mask_stem(sample)
+    indirect_path = out_root / "masks" / f"{mask_stem}_indirect.npy"
+    quadmask_path = out_root / "quadmasks" / f"{mask_stem}_quadmask.npy"
     np.save(indirect_path, indirect)
     np.save(quadmask_path, three_layer_to_quadmask(direct, indirect))
 
@@ -387,6 +399,7 @@ def _finalize_sample(
         "label_quality": {
             "direct": "davis_gt",
             "indirect": indirect_quality,
+            "target_ref": sample.target_ref_source,
             "text_condition": "void_bg",
         },
         "indirect_audit": {
@@ -459,6 +472,132 @@ def _validate_row(
             errors.append(f"{sid}: instruction does not contain target_ref {target_ref!r}")
     if desc and target_ref and target_ref.casefold() in desc.casefold():
         warnings.append(f"{sid}: post_removal_description contains target_ref {target_ref!r}")
+
+
+def _run_object_naming(
+    args: argparse.Namespace,
+    out_root: Path,
+    samples_by_sequence: dict[str, list[SampleWork]],
+    manual_names: dict[str, Any],
+) -> dict[str, Any]:
+    cache_path = out_root / "void_reasoner" / "object_names.vlm.json"
+    cache = _read_json(cache_path)
+    rows: list[dict[str, Any]] = []
+    for sequence, sequence_samples in samples_by_sequence.items():
+        if len(sequence_samples) <= 1:
+            continue
+        if all(_lookup_object_name(manual_names, sequence, sample) for sample in sequence_samples):
+            continue
+        if not args.overwrite_vlm and _cache_has_sequence(cache, sequence, sequence_samples):
+            continue
+        rows.append({
+            "sequence": sequence,
+            "objects": [
+                {
+                    "index": sample.obj_idx + 1,
+                    "object_id": sample.object_ids[0],
+                    "image_path": _rel(sample.workdir / f"naming_obj{sample.obj_idx:03d}.jpg", out_root),
+                }
+                for sample in sequence_samples
+            ],
+        })
+    if rows:
+        config_path = out_root / "void_reasoner" / "config.naming.json"
+        _write_json(config_path, rows)
+        _run([args.python_bin, args.name_objects_script, "--config", str(config_path), "--out-json", str(cache_path)], cwd=out_root)
+    return _read_json(cache_path)
+
+
+def _cache_has_sequence(cache: dict[str, Any], sequence: str, sequence_samples: list[SampleWork]) -> bool:
+    entry = cache.get(sequence)
+    if not isinstance(entry, dict):
+        return False
+    return all(str(sample.object_ids[0]) in entry for sample in sequence_samples)
+
+
+def _resolve_sample_targets(
+    samples_by_sequence: dict[str, list[SampleWork]],
+    *,
+    object_names: dict[str, Any],
+    vlm_names: dict[str, Any],
+) -> tuple[dict[str, list[SampleWork]], dict[str, set[str]]]:
+    resolved: dict[str, list[SampleWork]] = {}
+    forced_quarantine: dict[str, set[str]] = {}
+    for sequence, sequence_samples in samples_by_sequence.items():
+        candidates: list[tuple[SampleWork, str, str, tuple[str, ...]]] = []
+        for sample in sequence_samples:
+            target_ref, source = _target_ref_for_sample(
+                sequence,
+                sample,
+                object_count=len(sequence_samples),
+                object_names=object_names,
+                vlm_names=vlm_names,
+            )
+            target_ref = _clean_target_ref(target_ref)
+            key = tuple(sorted(_noun_tokens(target_ref)))
+            candidates.append((sample, target_ref, source, key))
+
+        counts: dict[tuple[str, ...], int] = {}
+        for _, target_ref, _, key in candidates:
+            if target_ref and key:
+                counts[key] = counts.get(key, 0) + 1
+
+        resolved_samples: list[SampleWork] = []
+        for sample, target_ref, source, key in candidates:
+            if not _valid_target_ref(target_ref) or counts.get(key, 0) > 1:
+                target_ref = ""
+                source = ""
+                forced_quarantine.setdefault(sample.sample_id, set()).add("unresolvable_target_ref")
+            instruction = f"remove the {target_ref}" if target_ref else ""
+            updated = replace(
+                sample,
+                target_ref=target_ref,
+                target_ref_source=source,
+                instruction=instruction,
+            )
+            _update_sample_metadata(updated)
+            resolved_samples.append(updated)
+        resolved[sequence] = resolved_samples
+    return resolved, forced_quarantine
+
+
+def _target_ref_for_sample(
+    sequence: str,
+    sample: SampleWork,
+    *,
+    object_count: int,
+    object_names: dict[str, Any],
+    vlm_names: dict[str, Any],
+) -> tuple[str, str]:
+    manual = _lookup_object_name(object_names, sequence, sample)
+    if manual:
+        return manual, "manual"
+    vlm = _lookup_object_name(vlm_names, sequence, sample)
+    if vlm:
+        return vlm, "vlm"
+    if object_count == 1:
+        return sequence.replace("-", " "), "sequence_slug"
+    return "", ""
+
+
+def _clean_target_ref(target_ref: str) -> str:
+    return " ".join(str(target_ref or "").strip().lower().split())
+
+
+def _valid_target_ref(target_ref: str) -> bool:
+    tokens = re.findall(r"[a-z0-9]+", target_ref.casefold())
+    return bool(tokens) and len(tokens) <= 4 and not _bad_target_ref(target_ref)
+
+
+def _update_sample_metadata(sample: SampleWork) -> None:
+    path = sample.workdir / "segmentation_info.json"
+    metadata = _read_json(path)
+    metadata.update({
+        "target_ref": sample.target_ref,
+        "target_ref_source": sample.target_ref_source,
+        "instruction": sample.instruction,
+    })
+    _write_json(path, metadata)
 
 
 def _run_stage2(
@@ -610,10 +749,21 @@ def _direct_stack_for_object(ann_paths: list[Path], object_id: int):
 def _read_annotation_indices(path: Path):
     import cv2
     import numpy as np
+    from PIL import Image
 
-    indexed = _read_indexed_png(path)
-    if indexed is not None:
-        return indexed
+    try:
+        img = Image.open(path)
+    except Exception:
+        img = None
+    if img is not None and img.mode == "P":
+        arr = np.asarray(img)
+        pal = img.getpalette() or []
+        palette = {
+            idx: tuple(int(x) for x in pal[idx * 3:idx * 3 + 3])
+            for idx in range(len(pal) // 3)
+            if len(pal[idx * 3:idx * 3 + 3]) == 3
+        }
+        return arr.astype(np.uint8), palette
 
     ann = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
     if ann is None:
@@ -621,83 +771,6 @@ def _read_annotation_indices(path: Path):
     if ann.ndim == 2:
         return ann.astype(np.uint8), {}
     raise ValueError(f"{path} is not an indexed or grayscale annotation; expanded RGB cannot preserve DAVIS object ids")
-
-
-def _read_indexed_png(path: Path):
-    import numpy as np
-
-    data = path.read_bytes()
-    if not data.startswith(b"\x89PNG\r\n\x1a\n"):
-        return None
-    pos = 8
-    width = height = bit_depth = color_type = interlace = None
-    palette: dict[int, tuple[int, int, int]] = {}
-    idat = bytearray()
-    while pos < len(data):
-        length = struct.unpack(">I", data[pos:pos + 4])[0]
-        chunk_type = data[pos + 4:pos + 8]
-        chunk = data[pos + 8:pos + 8 + length]
-        pos += 12 + length
-        if chunk_type == b"IHDR":
-            width, height, bit_depth, color_type, _, _, interlace = struct.unpack(">IIBBBBB", chunk)
-        elif chunk_type == b"PLTE":
-            for idx in range(0, len(chunk), 3):
-                palette[idx // 3] = (chunk[idx], chunk[idx + 1], chunk[idx + 2])
-        elif chunk_type == b"IDAT":
-            idat.extend(chunk)
-        elif chunk_type == b"IEND":
-            break
-
-    if color_type != 3:
-        return None
-    if bit_depth != 8 or interlace != 0:
-        raise ValueError(f"{path} uses unsupported indexed PNG bit depth/interlace")
-
-    raw = zlib.decompress(bytes(idat))
-    stride = int(width)
-    rows = []
-    prev = bytearray(stride)
-    offset = 0
-    for _ in range(int(height)):
-        filter_type = raw[offset]
-        offset += 1
-        cur = bytearray(raw[offset:offset + stride])
-        offset += stride
-        _unfilter_png_row(cur, prev, filter_type)
-        rows.append(bytes(cur))
-        prev = cur
-    return np.frombuffer(b"".join(rows), dtype=np.uint8).reshape(int(height), int(width)).copy(), palette
-
-
-def _unfilter_png_row(cur: bytearray, prev: bytearray, filter_type: int) -> None:
-    for i, value in enumerate(cur):
-        left = cur[i - 1] if i else 0
-        up = prev[i]
-        upper_left = prev[i - 1] if i else 0
-        if filter_type == 0:
-            continue
-        if filter_type == 1:
-            cur[i] = (value + left) & 0xFF
-        elif filter_type == 2:
-            cur[i] = (value + up) & 0xFF
-        elif filter_type == 3:
-            cur[i] = (value + ((left + up) // 2)) & 0xFF
-        elif filter_type == 4:
-            cur[i] = (value + _paeth(left, up, upper_left)) & 0xFF
-        else:
-            raise ValueError(f"unsupported PNG filter {filter_type}")
-
-
-def _paeth(left: int, up: int, upper_left: int) -> int:
-    p = left + up - upper_left
-    pa = abs(p - left)
-    pb = abs(p - up)
-    pc = abs(p - upper_left)
-    if pa <= pb and pa <= pc:
-        return left
-    if pb <= pc:
-        return up
-    return upper_left
 
 
 def _object_indices(arr: Any) -> list[int]:
@@ -714,26 +787,14 @@ def _palette_bgr(palette: dict[int, tuple[int, int, int]], idx: int) -> tuple[in
     return int(rgb[2]), int(rgb[1]), int(rgb[0])
 
 
-def _target_ref(
-    sequence: str,
-    davis_object: DavisObject,
-    object_count: int,
-    object_names: dict[str, Any],
-) -> str:
-    explicit = _lookup_object_name(object_names, sequence, davis_object)
-    if explicit:
-        return explicit
-    if object_count == 1:
-        return sequence.replace("-", " ")
-    return ""
-
-
-def _lookup_object_name(object_names: dict[str, Any], sequence: str, davis_object: DavisObject) -> str:
+def _lookup_object_name(object_names: dict[str, Any], sequence: str, obj: DavisObject | SampleWork) -> str:
     entry = object_names.get(sequence)
-    if isinstance(entry, list) and davis_object.obj_idx < len(entry):
-        return str(entry[davis_object.obj_idx]).strip().lower()
+    object_id = obj.object_id if isinstance(obj, DavisObject) else obj.object_ids[0]
+    obj_idx = obj.obj_idx
+    if isinstance(entry, list) and obj_idx < len(entry):
+        return str(entry[obj_idx]).strip().lower()
     if isinstance(entry, dict):
-        for key in (str(davis_object.object_id), str(davis_object.obj_idx), f"obj{davis_object.obj_idx:03d}"):
+        for key in (str(object_id), str(obj_idx), f"obj{obj_idx:03d}"):
             if key in entry:
                 return str(entry[key]).strip().lower()
     return ""
@@ -770,7 +831,21 @@ def _write_void_inputs(
     if first is None:
         raise ValueError(f"failed to read first frame for {sequence}")
     cv2.imwrite(str(workdir / "first_frame.jpg"), first)
+    if "obj_idx" in metadata and len(direct_stack):
+        direct_frame = direct_stack[frame_idx]
+        cv2.imwrite(str(workdir / f"naming_obj{int(metadata['obj_idx']):03d}.jpg"), _overlay_direct(first, direct_frame))
     _write_json(workdir / "segmentation_info.json", metadata)
+
+
+def _overlay_direct(frame: Any, direct: Any):
+    import numpy as np
+
+    out = np.asarray(frame).copy()
+    mask = np.asarray(direct).astype(bool)
+    red = np.zeros_like(out)
+    red[..., 2] = 255
+    out[mask] = (0.55 * out[mask] + 0.45 * red[mask]).astype(np.uint8)
+    return out
 
 
 def _ensure_dirs(out_root: Path) -> None:
@@ -899,6 +974,13 @@ def _config_row(sample: SampleWork, out_root: Path) -> dict[str, str]:
         "output_dir": _rel(sample.workdir, out_root),
         "instruction": sample.instruction,
     }
+
+
+def _mask_stem(sample: SampleWork) -> str:
+    if len(sample.object_ids) == 1:
+        return f"{sample.sequence}_obj{sample.obj_idx:03d}"
+    suffix = "_".join(f"obj{i:03d}" for i in sorted(int(part[3:]) for part in re.findall(r"obj\d{3}", sample.sample_id)))
+    return f"{sample.sequence}_{suffix}" if suffix else sample.sample_id
 
 
 def _run(cmd: list[str], *, cwd: Path) -> None:
