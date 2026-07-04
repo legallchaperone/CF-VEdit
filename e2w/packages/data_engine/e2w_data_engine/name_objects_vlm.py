@@ -5,10 +5,12 @@ import argparse
 import base64
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
 DEFAULT_MODEL = "gemini-3-pro-preview"
+MAX_RETRIES = 3
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -59,13 +61,18 @@ def _name_sequence(client: Any, model: str, row: dict[str, Any]) -> dict[str, st
             "{\"objects\":[{\"index\":1,\"noun\":\"man in blue shirt\"}]}"
         ),
     })
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": "You name highlighted video objects. Output valid JSON only."},
-            {"role": "user", "content": content},
-        ],
-    )
+    messages = [
+        {"role": "system", "content": "You name highlighted video objects. Output valid JSON only."},
+        {"role": "user", "content": content},
+    ]
+    for attempt in range(MAX_RETRIES):
+        try:
+            resp = client.chat.completions.create(model=model, messages=messages)
+            break
+        except Exception:
+            if attempt == MAX_RETRIES - 1:
+                raise
+            time.sleep(2 ** attempt)
     parsed = _parse_json(resp.choices[0].message.content)
     by_index = {int(obj["index"]): str(obj["noun"]).strip().lower() for obj in parsed.get("objects", [])}
     return {

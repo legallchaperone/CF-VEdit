@@ -13,6 +13,7 @@ if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
 
 from e2w_data_engine import davis2017_remove as davis
+from e2w_data_engine import name_objects_vlm
 
 
 class Davis2017RemoveTest(unittest.TestCase):
@@ -236,6 +237,43 @@ class Davis2017RemoveTest(unittest.TestCase):
 
             self.assertEqual(code, 0)
             self.assertEqual([row["target_ref"] for row in _read_jsonl(out / "manifest.jsonl")], ["person", "bike"])
+
+    def test_empty_vlm_cache_entry_reruns_namer_script(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            davis_root = Path(tmp) / "DAVIS"
+            out = Path(tmp) / "out"
+            stage2, stage3a = _write_stage_scripts(Path(tmp), mode="clean")
+            namer = _write_namer_script(Path(tmp), mode="names")
+            _write_synthetic_davis(davis_root, objects=2)
+            (out / "void_reasoner").mkdir(parents=True)
+            (out / "void_reasoner" / "object_names.vlm.json").write_text(
+                json.dumps({"toy": {"1": "person", "2": ""}}),
+                encoding="utf-8",
+            )
+
+            code = davis.main([
+                "build",
+                "--davis-root", str(davis_root),
+                "--split", "train",
+                "--out-root", str(out),
+                "--python-bin", sys.executable,
+                "--name-objects-script", str(namer),
+                "--stage2-script", str(stage2),
+                "--stage3a-script", str(stage3a),
+                "--limit", "1",
+            ])
+
+            self.assertEqual(code, 0)
+            self.assertEqual([row["target_ref"] for row in _read_jsonl(out / "manifest.jsonl")], ["person", "bike"])
+
+    def test_vlm_namer_retries_transient_gateway_error(self):
+        client = _FakeRetryClient()
+        row = {"objects": [{"index": 1, "object_id": 7, "image_path": __file__}]}
+
+        names = name_objects_vlm._name_sequence(client, "model", row)
+
+        self.assertEqual(names, {"7": "person"})
+        self.assertEqual(client.calls, 2)
 
     def test_manual_name_beats_vlm_cache(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -464,6 +502,24 @@ out_json.write_text(json.dumps(cache))
 
 def _read_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+class _FakeRetryClient:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.chat = self
+        self.completions = self
+
+    def create(self, **kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("transient")
+        return _Obj(choices=[_Obj(message=_Obj(content='{"objects":[{"index":1,"noun":"person"}]}'))])
+
+
+class _Obj:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
 
 
 if __name__ == "__main__":

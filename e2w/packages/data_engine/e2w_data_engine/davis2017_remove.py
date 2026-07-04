@@ -512,7 +512,7 @@ def _cache_has_sequence(cache: dict[str, Any], sequence: str, sequence_samples: 
     entry = cache.get(sequence)
     if not isinstance(entry, dict):
         return False
-    return all(str(sample.object_ids[0]) in entry for sample in sequence_samples)
+    return all(_clean_target_ref(entry.get(str(sample.object_ids[0]), "")) for sample in sequence_samples)
 
 
 def _resolve_sample_targets(
