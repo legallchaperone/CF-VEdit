@@ -6,6 +6,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from PIL import Image
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 if str(PACKAGE_ROOT) not in sys.path:
@@ -15,12 +16,12 @@ from e2w_data_engine import davis2017_remove as davis
 
 
 class Davis2017RemoveTest(unittest.TestCase):
-    def test_object_colors_ignore_black_and_are_bgr(self):
-        mask = np.zeros((3, 4, 3), dtype=np.uint8)
-        mask[0, 0] = (0, 0, 128)
-        mask[1, 1] = (0, 128, 0)
+    def test_object_colors_read_palette_indices_and_ignore_void(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ann.png"
+            _write_palette_png(path, np.array([[0, 1, 2, 255]], dtype=np.uint8))
 
-        self.assertEqual(davis.object_colors_bgr(mask), [(0, 0, 128), (0, 128, 0)])
+            self.assertEqual(davis.object_colors_bgr(path), [(0, 0, 128), (0, 128, 0)])
 
     def test_quadmask_direct_wins_and_uses_canonical_values(self):
         direct = np.array([[[False, True], [False, True]]])
@@ -30,6 +31,26 @@ class Davis2017RemoveTest(unittest.TestCase):
 
         self.assertEqual(quadmask.dtype, np.uint8)
         self.assertEqual(quadmask.tolist(), [[[255, 0], [127, 0]]])
+
+    def test_black_mask_video_preserves_exact_zero_pixels(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            direct = np.zeros((2, 12, 16), dtype=bool)
+            direct[:, 2:6, 3:8] = True
+            path = Path(tmp) / "black_mask.mp4"
+
+            davis._write_mask_video(direct, path)
+
+            cap = cv2.VideoCapture(str(path))
+            zero_counts = []
+            while True:
+                ok, frame = cap.read()
+                if not ok:
+                    break
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                zero_counts.append(int((gray == 0).sum()))
+            cap.release()
+
+        self.assertEqual(zero_counts, [20, 20])
 
     def test_validate_rejects_bad_quadmask_values(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -67,7 +88,7 @@ class Davis2017RemoveTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             davis_root = Path(tmp) / "DAVIS"
             out = Path(tmp) / "out"
-            _write_synthetic_davis(davis_root)
+            _write_synthetic_davis(davis_root, objects=1)
 
             code = davis.main([
                 "build",
@@ -97,8 +118,106 @@ class Davis2017RemoveTest(unittest.TestCase):
             self.assertEqual(len(config), 1)
             self.assertEqual(config[0]["instruction"], "remove the toy")
 
+    def test_two_objects_void_excluded_and_other_object_stays_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            davis_root = Path(tmp) / "DAVIS"
+            out = Path(tmp) / "out"
+            names = Path(tmp) / "names.json"
+            stage2, stage3a = _write_stage_scripts(Path(tmp), mode="clean")
+            _write_synthetic_davis(davis_root, objects=2, include_void=True)
+            names.write_text(json.dumps({"toy": ["person", "bike"]}), encoding="utf-8")
 
-def _write_synthetic_davis(root: Path) -> None:
+            code = davis.main([
+                "build",
+                "--davis-root", str(davis_root),
+                "--split", "train",
+                "--out-root", str(out),
+                "--object-names-json", str(names),
+                "--python-bin", sys.executable,
+                "--stage2-script", str(stage2),
+                "--stage3a-script", str(stage3a),
+                "--limit", "1",
+            ])
+
+            self.assertEqual(code, 0)
+            manifest = _read_jsonl(out / "manifest.jsonl")
+            quarantine = _read_jsonl(out / "quarantine.jsonl")
+            self.assertEqual(quarantine, [])
+            self.assertEqual([row["target_ref"] for row in manifest], ["person", "bike"])
+            self.assertEqual([row["object_ids"] for row in manifest], [[1], [2]])
+
+            person = manifest[0]
+            quadmask = np.load(out / person["quadmask_npy"], allow_pickle=False)
+            self.assertEqual(int(quadmask[0, 7, 10]), 255)
+
+    def test_grey_mask_frame_mismatch_quarantines_instead_of_empty_weak_label(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            davis_root = Path(tmp) / "DAVIS"
+            out = Path(tmp) / "out"
+            stage2, stage3a = _write_stage_scripts(Path(tmp), mode="mismatch")
+            _write_synthetic_davis(davis_root, objects=1)
+
+            code = davis.main([
+                "build",
+                "--davis-root", str(davis_root),
+                "--split", "train",
+                "--out-root", str(out),
+                "--python-bin", sys.executable,
+                "--stage2-script", str(stage2),
+                "--stage3a-script", str(stage3a),
+                "--limit", "1",
+            ])
+
+            self.assertEqual(code, 0)
+            manifest = _read_jsonl(out / "manifest.jsonl")
+            quarantine = _read_jsonl(out / "quarantine.jsonl")
+            self.assertEqual(manifest, [])
+            self.assertEqual(len(quarantine), 1)
+            self.assertIn("indirect_frame_mismatch", quarantine[0]["quarantine_reasons"])
+            self.assertNotEqual(quarantine[0]["label_quality"]["indirect"], "void_vlm_weak")
+
+    def test_integral_pair_emits_merged_row_and_quarantines_members(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            davis_root = Path(tmp) / "DAVIS"
+            out = Path(tmp) / "out"
+            names = Path(tmp) / "names.json"
+            stage2, stage3a = _write_stage_scripts(Path(tmp), mode="integral")
+            _write_synthetic_davis(davis_root, objects=2)
+            names.write_text(json.dumps({"toy": ["person", "bike"]}), encoding="utf-8")
+
+            code = davis.main([
+                "build",
+                "--davis-root", str(davis_root),
+                "--split", "train",
+                "--out-root", str(out),
+                "--object-names-json", str(names),
+                "--python-bin", sys.executable,
+                "--stage2-script", str(stage2),
+                "--stage3a-script", str(stage3a),
+                "--limit", "1",
+            ])
+
+            self.assertEqual(code, 0)
+            manifest = _read_jsonl(out / "manifest.jsonl")
+            quarantine = _read_jsonl(out / "quarantine.jsonl")
+            self.assertEqual(len(manifest), 1)
+            merged = manifest[0]
+            self.assertEqual(merged["target_ref"], "person and bike")
+            self.assertIn("person", merged["instruction"])
+            self.assertIn("bike", merged["instruction"])
+            self.assertEqual(merged["merged_from"], [
+                "davis2017_train_toy_obj000",
+                "davis2017_train_toy_obj001",
+            ])
+
+            direct = np.load(out / merged["direct_mask_npy"], allow_pickle=False)
+            self.assertTrue(bool(direct[0, 2, 3]))
+            self.assertTrue(bool(direct[0, 7, 10]))
+            self.assertEqual(len(quarantine), 2)
+            self.assertTrue(all("integral_pair_member" in row["quarantine_reasons"] for row in quarantine))
+
+
+def _write_synthetic_davis(root: Path, *, objects: int, include_void: bool = False) -> None:
     (root / "ImageSets" / "2017").mkdir(parents=True)
     (root / "ImageSets" / "2017" / "train.txt").write_text("toy\n", encoding="utf-8")
     (root / "ImageSets" / "2017" / "val.txt").write_text("", encoding="utf-8")
@@ -110,15 +229,21 @@ def _write_synthetic_davis(root: Path) -> None:
     video_dir.mkdir(parents=True)
 
     frames = []
-    for idx in range(2):
+    for idx in range(3):
         frame = np.full((12, 16, 3), 80 + idx * 20, dtype=np.uint8)
         frame[2:6, 3:7] = (10, 20, 200)
+        if objects > 1:
+            frame[7:10, 10:14] = (10, 200, 20)
         frames.append(frame)
         cv2.imwrite(str(frame_dir / f"{idx:05d}.jpg"), frame)
 
-        ann = np.zeros((12, 16, 3), dtype=np.uint8)
-        ann[2:6, 3:7] = (0, 0, 128)
-        cv2.imwrite(str(ann_dir / f"{idx:05d}.png"), ann)
+        ann = np.zeros((12, 16), dtype=np.uint8)
+        ann[2:6, 3:7] = 1
+        if objects > 1:
+            ann[7:10, 10:14] = 2
+        if include_void:
+            ann[0, 0] = 255
+        _write_palette_png(ann_dir / f"{idx:05d}.png", ann)
 
     writer = cv2.VideoWriter(
         str(video_dir / "toy.mp4"),
@@ -129,6 +254,63 @@ def _write_synthetic_davis(root: Path) -> None:
     for frame in frames:
         writer.write(frame)
     writer.release()
+
+
+def _write_palette_png(path: Path, arr: np.ndarray) -> None:
+    image = Image.fromarray(arr.astype(np.uint8), mode="P")
+    palette = [0, 0, 0] * 256
+    palette[1 * 3:1 * 3 + 3] = [128, 0, 0]
+    palette[2 * 3:2 * 3 + 3] = [0, 128, 0]
+    palette[255 * 3:255 * 3 + 3] = [255, 255, 255]
+    image.putpalette(palette)
+    image.save(path)
+
+
+def _write_stage_scripts(root: Path, *, mode: str) -> tuple[Path, Path]:
+    stage2 = root / f"stage2_{mode}.py"
+    stage3a = root / f"stage3a_{mode}.py"
+    stage2.write_text(f"""
+import json
+import sys
+from pathlib import Path
+
+config = Path(sys.argv[sys.argv.index("--config") + 1])
+for row in json.loads(config.read_text()):
+    out = Path(row["output_dir"])
+    out.mkdir(parents=True, exist_ok=True)
+    instruction = row["instruction"]
+    affected = []
+    integral = []
+    if {mode!r} == "mismatch":
+        affected = [{{"noun": "shadow", "will_move": False, "first_appears_frame": 0}}]
+    if {mode!r} == "integral" and "person" in instruction and "bike" not in instruction:
+        integral = [{{"noun": "bike", "why": "bike belongs to rider"}}]
+    (out / "vlm_analysis.json").write_text(json.dumps({{
+        "scene_description": "the scene after removal",
+        "integral_belongings": integral,
+        "affected_objects": affected,
+        "confidence": 1.0,
+    }}))
+""", encoding="utf-8")
+    stage3a.write_text(f"""
+import json
+import sys
+from pathlib import Path
+
+import cv2
+import numpy as np
+
+config = Path(sys.argv[sys.argv.index("--config") + 1])
+for row in json.loads(config.read_text()):
+    out = Path(row["output_dir"])
+    if {mode!r} != "mismatch":
+        continue
+    frame = np.full((12, 16, 3), 127, dtype=np.uint8)
+    writer = cv2.VideoWriter(str(out / "grey_mask.mp4"), cv2.VideoWriter_fourcc(*"mp4v"), 12, (16, 12))
+    writer.write(frame)
+    writer.release()
+""", encoding="utf-8")
+    return stage2, stage3a
 
 
 def _read_jsonl(path: Path) -> list[dict]:
