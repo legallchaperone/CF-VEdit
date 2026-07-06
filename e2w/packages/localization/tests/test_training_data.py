@@ -98,6 +98,32 @@ class TrainingDataAdapterTest(unittest.TestCase):
         # real (larger) DAVIS masks sit ~0.95. Well above the 0.85 gate either way.
         self.assertGreaterEqual(adapter._polygon_fidelity(polys, mask), 0.90)
 
+    def test_single_sequence_trains_with_no_val_split(self):
+        # P2: one sequence must NOT be sent entirely to val (empty train set).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "out"; root.mkdir()
+            row = _write_clip(root, "solo", "solo_obj000", frames=8, box=(10, 10, 40, 50))
+            (root / "manifest.jsonl").write_text(json.dumps(row))
+            dst = Path(tmp) / "dst"
+            meta = adapter.build(adapter.AdapterConfig(out_root=str(root), dst=str(dst),
+                                                       frame_stride=1, val_fraction=0.5))
+            self.assertEqual(meta["val_sequences"], [])          # no held-out
+            self.assertGreater(meta["stats"]["train_images"], 0)  # trains, not empty
+            self.assertGreater(len(json.loads((dst / "annotations.json").read_text())), 0)
+            self.assertEqual((dst / "val.jsonl").read_text().strip(), "")
+
+    def test_empty_trainset_raises(self):
+        # P2: an all-empty-mask root must fail loud, not write annotations=[].
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "out"; root.mkdir()
+            row = _write_clip(root, "blank", "blank_obj000", frames=4,
+                              box=(10, 10, 40, 50), empty_frames=(0, 1, 2, 3))
+            (root / "manifest.jsonl").write_text(json.dumps(row))
+            dst = Path(tmp) / "dst"
+            with self.assertRaises(ValueError):
+                adapter.build(adapter.AdapterConfig(out_root=str(root), dst=str(dst),
+                                                    frame_stride=1, val_fraction=0.5))
+
     def test_fidelity_gate_drops_ring_mask(self):
         # a ring (hole) round-trips badly under RETR_EXTERNAL -> gate must catch it
         ring = np.zeros((64, 64), bool)

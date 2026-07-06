@@ -92,6 +92,10 @@ def _split_sequences(sequences: list[str], val_fraction: float, max_val: int) ->
     """Deterministic held-out sequence set (sorted, take a stride — no RNG so the
     split is reproducible across runs and reviewable)."""
     seqs = sorted(set(sequences))
+    if len(seqs) < 2:
+        # Need >=2 sequences to hold one out without emptying the train split;
+        # with 1 sequence, keep everything for training (no held-out eval).
+        return set()
     n_val = min(max_val, max(1, round(len(seqs) * val_fraction)))
     if n_val >= len(seqs):
         n_val = max(1, len(seqs) // 5)
@@ -150,6 +154,17 @@ def build(cfg: AdapterConfig) -> dict:
             Image.open(frame_paths[t]).convert("RGB").save(dst / "images" / img_name)
             train_items.append({"image": img_name, "mask": [polys], "text": [phrase]})
             stats["train_images"] += 1
+
+    if not train_items:
+        # Fail loud instead of writing an empty annotations.json the Sa2VA
+        # trainer would only choke on much later ("no samples"). Covers: <2
+        # sequences that still yielded nothing, all-empty masks, or every frame
+        # dropped by the fidelity gate.
+        raise ValueError(
+            f"adapter produced 0 training frames from {stats['rows']} rows "
+            f"(val_sequences={sorted(val_seqs)}, stats={stats}). Check that "
+            f"'{mask_field}' masks are non-empty and pass the fidelity gate, and "
+            "that the manifest has >=2 sequences if you want a held-out split.")
 
     (dst / "annotations.json").write_text(json.dumps(train_items))
     with (dst / "val.jsonl").open("w") as f:
