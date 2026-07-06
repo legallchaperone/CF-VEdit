@@ -1,7 +1,9 @@
 # Localization training notes (Stage 0 seg branch)
 
 Running log of training-method decisions and deferred ideas for the seg_dir /
-seg_ind branch. Design anchor: `E2W-v0-Remove-Only-Spec.md` §Stage 0.
+seg_ind branch. Design anchors: `Sa2VA-Modification-Plan.md` §1 (on main) and
+`E2W-v0-Remove-Only-Spec.md` §Stage 0 (authoritative build spec, currently on the
+`feat/e2w-void-renderer` branch — not yet merged to main).
 
 ## Current method (baseline)
 Pseudo-label distillation of VOID's quadmask into two query tokens: one Sa2VA

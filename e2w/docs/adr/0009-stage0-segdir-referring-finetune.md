@@ -2,9 +2,13 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-06
-- **Anchors:** `E2W-v0-Remove-Only-Spec.md` §Stage 0; [ADR-0003](0003-enable-full-untrained-a1-path.md)
-  (untrained A.1 path), [ADR-0008](0008-davis2017-void-stage01-data.md) (the data);
+- **Anchors:** `Sa2VA-Modification-Plan.md` §1 (localization / seg branch, on main);
+  [ADR-0003](0003-enable-full-untrained-a1-path.md) (untrained A.1 path),
+  [ADR-0008](0008-davis2017-void-stage01-data.md) (the data);
   `packages/localization/e2w_localization/training/`, `TRAINING_NOTES.md`.
+  The fuller `E2W-v0-Remove-Only-Spec.md` §Stage 0 is the authoritative build
+  spec but currently lives on the model-build branch (`feat/e2w-void-renderer`),
+  not yet merged to main — cited for provenance, resolves post-merge.
 
 ## Context
 

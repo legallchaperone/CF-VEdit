@@ -62,13 +62,24 @@ def evaluate(val_jsonl: str, out_root: str, weights: str, *, device: str = "cuda
                          "iou": iou, "dice": dice, "empty_frac": empty_frac})
         empties += empty_frac >= 0.5
 
+    # A planner failure means seg_dir produced no mask -> a total miss (IoU 0),
+    # so failed clips already carry iou/dice = 0. The HEADLINE metric averages
+    # over ALL clips (failure = 0 in the denominator) so a run that fails on many
+    # clips cannot report a high mean off the few that succeeded. valid-only is
+    # kept as a secondary diagnostic.
     valid = [c for c in per_clip if "error" not in c]
+    failed = len(per_clip) - len(valid)
+    n_all = max(1, len(per_clip))
+    n_valid = max(1, len(valid))
     summary = {
         "weights": weights,
         "clips": len(clips),
-        "mean_iou": float(sum(c["iou"] for c in valid) / max(1, len(valid))),
-        "mean_dice": float(sum(c["dice"] for c in valid) / max(1, len(valid))),
+        "failed_clips": int(failed),
         "empty_or_failed_clips": int(empties),
+        "mean_iou": float(sum(c["iou"] for c in per_clip) / n_all),
+        "mean_dice": float(sum(c["dice"] for c in per_clip) / n_all),
+        "mean_iou_valid_only": float(sum(c["iou"] for c in valid) / n_valid),
+        "mean_dice_valid_only": float(sum(c["dice"] for c in valid) / n_valid),
     }
     return {"summary": summary, "per_clip": per_clip}
 
