@@ -59,7 +59,9 @@ python tools/convert_to_hf.py "$CFG" --pth-model work_dirs/.../iter_XXXX.pth \
 # held-out IoU/Dice — SAME command for the zero-shot baseline (point --weights at
 # the stock Sa2VA-7B) and the finetuned model (point at the converted dir):
 cd e2w/packages/localization
-PYTHONPATH=$(pwd) python -m e2w_localization.training.eval \
+# eval imports CausalPlanner -> planner.py imports e2w_core, so BOTH packages
+# must be on PYTHONPATH (e2w_core is the sibling package, ../e2w_core).
+PYTHONPATH=$(pwd):$(pwd)/../e2w_core python -m e2w_localization.training.eval \
   --val-jsonl /data/cwx/e2w-data/sa2va_stage0_segdir/val.jsonl \
   --out-root  /data/cwx/e2w-data/davis2017_remove \
   --weights   /data/cwx/Sa2VA-Qwen2_5-VL-7B \

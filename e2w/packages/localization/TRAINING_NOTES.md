@@ -5,14 +5,28 @@ seg_ind branch. Design anchors: `Sa2VA-Modification-Plan.md` §1 (on main) and
 `E2W-v0-Remove-Only-Spec.md` §Stage 0 (authoritative build spec, currently on the
 `feat/e2w-void-renderer` branch — not yet merged to main).
 
-## Current method (baseline)
-Pseudo-label distillation of VOID's quadmask into two query tokens: one Sa2VA
-forward → `seg_dir`/`seg_ind` hidden → shared projection (`text_hidden_fcs`) →
-frozen SAM2 → two binary masks. Loss = per-layer **Dice + BCE** (seg_dir ←
-direct GT, seg_ind ← affected GT). Trainable: Sa2VA LoRA (shared) + seg-token
-embeddings + shared projection. SAM2 frozen. Seg branch gets gradient **only**
-from this mask loss (threshold→quadmask is non-differentiable; video loss can't
-reach it).
+## Current method — what THIS PR actually trains (ADR-0009)
+**seg_dir only**, as stock Sa2VA `[SEG]` referring segmentation ("segment
+<target_ref>" → its mask), on the DAVIS direct masks, via the **vendored Sa2VA
+XTuner trainer**. Not the dual-token path. Concretely:
+- One `[SEG]` per image → `text_hidden_fcs` projection → SAM2 mask decoder →
+  one binary mask. Loss (upstream) = **2·BCE + 0.5·Dice**.
+- Trainable = LoRA on the Qwen LLM (r=128) + the `text_hidden_fcs` projection +
+  the **SAM2 mask decoder** (`frozen_sam2_decoder=False`, per the config); the
+  SAM2 image/prompt encoder, the visual encoder, and the LLM base are frozen.
+  (This matches Sa2VA's own finetune recipe — the mask *decoder* is tuned, not
+  the whole of SAM2.)
+- Data adapter expands clips → per-frame `{image, direct-mask polygon,
+  target_ref}` (`training/data.py`).
+
+## Eventual target — deferred (spec change A)
+The spec's architecture is two fixed query tokens `seg_dir`/`seg_ind` read in
+**one** forward → shared projection → SAM2 → two masks, `seg_ind` supervised by
+the affected GT, seg branch trained **only** by the mask loss (the
+threshold→quadmask step is non-differentiable, so renderer/video loss can't reach
+it). That dual-token trainer + `seg_ind` are NOT built here — deferred until the
+seg_dir floor + learning curve are read and the data source is scaled (see the
+data-scaling note below).
 
 ## Deferred ideas (not doing now)
 
